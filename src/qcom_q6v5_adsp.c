@@ -568,9 +568,8 @@ static const struct rproc_ops adsp_ops = {
  * the Qualcomm hypervisor (QHEE .367) that normally runs them, and are replayed as plain
  * MMIO accesses on the absolute addresses QHEE uses.
  *
- * SLOPWARE: written largely by AI agents from reverse-engineered firmware and tested on
- * one ASUS Vivobook S15. Several of these registers belong to clock controllers that
- * have (or should have) their own drivers.
+ * Several of these registers belong to clock controllers that have (or should have)
+ * their own drivers.
  */
 
 #define QHEE_CDSP_MAP_MAX	128

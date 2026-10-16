@@ -1,4 +1,4 @@
-From 78443c6a4ae6aa9bafe3f6ecb1aff4bc7f9325a6 Mon Sep 17 00:00:00 2001
+From 64808a69e735e5bda31c5a60f92b8185630c8d3d Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 3 Oct 2026 18:48:43 +0300
 Subject: [PATCH 1/5] firmware: qcom: tzmem: qcom,shm-bridge-vmid self-owner

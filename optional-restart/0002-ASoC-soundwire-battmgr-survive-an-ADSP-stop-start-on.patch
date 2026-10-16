@@ -1,4 +1,4 @@
-From af1f455392beac397fa771373ee46c59a7ec85a6 Mon Sep 17 00:00:00 2001
+From 31be9ac6c491f4861b91efda4eb51ebd5bf72f9c Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Fri, 16 Oct 2026 18:43:26 +0300
 Subject: [PATCH 2/3] ASoC/soundwire/battmgr: survive an ADSP stop/start on X1E

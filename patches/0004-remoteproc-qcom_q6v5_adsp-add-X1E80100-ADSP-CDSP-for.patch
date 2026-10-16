@@ -1,4 +1,4 @@
-From 7093b169e0e311315bd7d9354add483699e00289 Mon Sep 17 00:00:00 2001
+From cc0bf8ee9113e94ca45ba7a0f75010c1e909a110 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Fri, 16 Oct 2026 20:17:12 +0300
 Subject: [PATCH 4/5] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP/CDSP for
@@ -19,8 +19,8 @@ New compatibles: qcom,x1e80100-adsp-pil, qcom,x1e80100-cdsp-pil.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  drivers/remoteproc/Kconfig          |    1 +
- drivers/remoteproc/qcom_q6v5_adsp.c | 1191 ++++++++++++++++++++++++++-
- 2 files changed, 1183 insertions(+), 9 deletions(-)
+ drivers/remoteproc/qcom_q6v5_adsp.c | 1190 ++++++++++++++++++++++++++-
+ 2 files changed, 1182 insertions(+), 9 deletions(-)
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index 5b56b2dcc725..ace20c1dc73d 100644
@@ -35,7 +35,7 @@ index 5b56b2dcc725..ace20c1dc73d 100644
  	  Say y here to support the Peripheral Image Loader
  	  for the non-TrustZone part of Qualcomm Technology Inc. ADSP and CDSP
 diff --git a/drivers/remoteproc/qcom_q6v5_adsp.c b/drivers/remoteproc/qcom_q6v5_adsp.c
-index 2e5fb5954fa9..f9494a49c734 100644
+index 2e5fb5954fa9..22f8f4ba0ba0 100644
 --- a/drivers/remoteproc/qcom_q6v5_adsp.c
 +++ b/drivers/remoteproc/qcom_q6v5_adsp.c
 @@ -4,6 +4,10 @@
@@ -97,7 +97,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  };
  
  static int qcom_rproc_pds_attach(struct qcom_adsp *adsp, const char **pd_names,
-@@ -532,6 +563,1082 @@ static const struct rproc_ops adsp_ops = {
+@@ -532,6 +563,1081 @@ static const struct rproc_ops adsp_ops = {
  	.panic = adsp_panic,
  };
  
@@ -106,9 +106,8 @@ index 2e5fb5954fa9..f9494a49c734 100644
 + * the Qualcomm hypervisor (QHEE .367) that normally runs them, and are replayed as plain
 + * MMIO accesses on the absolute addresses QHEE uses.
 + *
-+ * SLOPWARE: written largely by AI agents from reverse-engineered firmware and tested on
-+ * one ASUS Vivobook S15. Several of these registers belong to clock controllers that
-+ * have (or should have) their own drivers.
++ * Several of these registers belong to clock controllers that have (or should have)
++ * their own drivers.
 + */
 +
 +#define QHEE_CDSP_MAP_MAX	128
@@ -1180,7 +1179,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)
  {
  	int num_clks = 0;
-@@ -667,15 +1774,23 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -667,15 +1773,23 @@ static int adsp_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -1207,7 +1206,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
  
  	adsp = rproc->priv;
-@@ -683,6 +1798,7 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -683,6 +1797,7 @@ static int adsp_probe(struct platform_device *pdev)
  	adsp->rproc = rproc;
  	adsp->info_name = desc->sysmon_name;
  	adsp->has_iommu = desc->has_iommu;
@@ -1215,7 +1214,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  
  	platform_set_drvdata(pdev, adsp);
  
-@@ -704,13 +1820,19 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -704,13 +1819,19 @@ static int adsp_probe(struct platform_device *pdev)
  		return dev_err_probe(&pdev->dev, ret,
  				     "Failed to attach proxy power domains\n");
  
@@ -1241,7 +1240,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  
  	ret = qcom_q6v5_init(&adsp->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_adsp_pil_handover);
-@@ -728,6 +1850,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -728,6 +1849,12 @@ static int adsp_probe(struct platform_device *pdev)
  		goto deinit_remove_glink_pdm_ssr;
  	}
  
@@ -1254,7 +1253,7 @@ index 2e5fb5954fa9..f9494a49c734 100644
  	ret = rproc_add(rproc);
  	if (ret)
  		goto remove_sysmon;
-@@ -827,11 +1955,56 @@ static const struct adsp_pil_data wpss_resource_init = {
+@@ -827,11 +1954,56 @@ static const struct adsp_pil_data wpss_resource_init = {
  	.num_pds = 2,
  };
  
