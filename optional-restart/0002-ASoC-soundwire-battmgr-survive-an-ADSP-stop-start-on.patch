@@ -1,0 +1,185 @@
+From af1f455392beac397fa771373ee46c59a7ec85a6 Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Fri, 16 Oct 2026 18:43:26 +0300
+Subject: [PATCH 2/3] ASoC/soundwire/battmgr: survive an ADSP stop/start on X1E
+ at EL2
+
+Port the service-recovery fixes that made ADSP restart work on 7.2 (Codex build04):
+- lpass rx/tx/va/wsa macros: force runtime suspend in .remove so no runtime callback
+  runs after the managed clock providers are gone;
+- soundwire qcom: on remove, stop runtime PM and drain the IRQ before the bus and hclk
+  go away, and leave the trigger type to DT so a reprobe does not change it;
+- qcom_battmgr: read the unit after update_info() (the first read may select it) and
+  invalidate cached info when the battery service comes back up.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/power/supply/qcom_battmgr.c |  6 +++++-
+ drivers/soundwire/qcom.c            | 16 +++++++++++++---
+ sound/soc/codecs/lpass-rx-macro.c   | 10 ++++++++++
+ sound/soc/codecs/lpass-tx-macro.c   |  6 ++++++
+ sound/soc/codecs/lpass-va-macro.c   |  6 ++++++
+ sound/soc/codecs/lpass-wsa-macro.c  | 10 ++++++++++
+ 6 files changed, 50 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 7716eb9e1aff..f1d84ee8c2b2 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -514,7 +514,7 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 					 union power_supply_propval *val)
+ {
+ 	struct qcom_battmgr *battmgr = power_supply_get_drvdata(psy);
+-	enum qcom_battmgr_unit unit = battmgr->unit;
++	enum qcom_battmgr_unit unit;
+ 	int ret;
+ 
+ 	if (!battmgr->service_up)
+@@ -528,6 +528,9 @@ static int qcom_battmgr_bat_get_property(struct power_supply *psy,
+ 	if (ret < 0)
+ 		return ret;
+ 
++	/* update_info may select units on this very first read. */
++	unit = battmgr->unit;
++
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		val->intval = battmgr->status.status;
+@@ -1604,6 +1607,7 @@ static void qcom_battmgr_pdr_notify(void *priv, int state)
+ 	struct qcom_battmgr *battmgr = priv;
+ 
+ 	if (state == SERVREG_SERVICE_STATE_UP) {
++		WRITE_ONCE(battmgr->info.valid, false);
+ 		battmgr->service_up = true;
+ 		schedule_work(&battmgr->enable_work);
+ 	} else {
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+index dc2400a1739f..bfdf27f06030 100644
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -1644,8 +1644,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
+ 
+ 	ret = devm_request_threaded_irq(dev, ctrl->irq, NULL,
+ 					qcom_swrm_irq_handler,
+-					IRQF_TRIGGER_RISING |
+-					IRQF_ONESHOT,
++					IRQF_ONESHOT, /* DT owns the trigger type across reprobe. */
+ 					"soundwire", ctrl);
+ 	if (ret) {
+ 		dev_err(dev, "Failed to request soundwire irq\n");
+@@ -1713,10 +1712,21 @@ static int qcom_swrm_probe(struct platform_device *pdev)
+ 
+ static void qcom_swrm_remove(struct platform_device *pdev)
+ {
+-	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
++	struct device *dev = &pdev->dev;
++	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(dev);
++	int active;
+ 
++	/* No callback may outlive ctrl or run on a new, half-built bus. */
++	active = pm_runtime_resume_and_get(dev);
++	pm_runtime_disable(dev);
++	pm_runtime_dont_use_autosuspend(dev);
+ 	sdw_bus_master_delete(&ctrl->bus);
++	disable_irq(ctrl->irq);
++	synchronize_irq(ctrl->irq);
+ 	clk_disable_unprepare(ctrl->hclk);
++	if (active >= 0)
++		pm_runtime_put_noidle(dev);
++	pm_runtime_set_suspended(dev);
+ }
+ 
+ static int __maybe_unused swrm_runtime_resume(struct device *dev)
+diff --git a/sound/soc/codecs/lpass-rx-macro.c b/sound/soc/codecs/lpass-rx-macro.c
+index 282a6aaa9986..1d7379d59c61 100644
+--- a/sound/soc/codecs/lpass-rx-macro.c
++++ b/sound/soc/codecs/lpass-rx-macro.c
+@@ -4000,6 +4000,15 @@ static const struct dev_pm_ops rx_macro_pm_ops = {
+ 	RUNTIME_PM_OPS(rx_macro_runtime_suspend, rx_macro_runtime_resume, NULL)
+ };
+ 
++static void rx_macro_remove(struct platform_device *pdev)
++{
++	/* Runtime callbacks must finish before managed clock providers disappear. */
++	pm_runtime_force_suspend(&pdev->dev);
++	/* Balance force_suspend; devm cleanup owns the final disable. */
++	pm_runtime_enable(&pdev->dev);
++	pm_runtime_dont_use_autosuspend(&pdev->dev);
++}
++
+ static struct platform_driver rx_macro_driver = {
+ 	.driver = {
+ 		.name = "rx_macro",
+@@ -4008,6 +4017,7 @@ static struct platform_driver rx_macro_driver = {
+ 		.pm = pm_ptr(&rx_macro_pm_ops),
+ 	},
+ 	.probe = rx_macro_probe,
++	.remove = rx_macro_remove,
+ };
+ 
+ module_platform_driver(rx_macro_driver);
+diff --git a/sound/soc/codecs/lpass-tx-macro.c b/sound/soc/codecs/lpass-tx-macro.c
+index a8e83eb60ba2..4f60830e3179 100644
+--- a/sound/soc/codecs/lpass-tx-macro.c
++++ b/sound/soc/codecs/lpass-tx-macro.c
+@@ -2389,6 +2389,12 @@ static void tx_macro_remove(struct platform_device *pdev)
+ {
+ 	struct tx_macro *tx = dev_get_drvdata(&pdev->dev);
+ 
++	/* Runtime callbacks must finish before managed clock providers disappear. */
++	pm_runtime_force_suspend(&pdev->dev);
++	/* Balance force_suspend; devm cleanup owns the final disable. */
++	pm_runtime_enable(&pdev->dev);
++	pm_runtime_dont_use_autosuspend(&pdev->dev);
++
+ 	lpass_macro_pds_exit(tx->pds);
+ }
+ 
+diff --git a/sound/soc/codecs/lpass-va-macro.c b/sound/soc/codecs/lpass-va-macro.c
+index dbc5795b9273..db408f3f72be 100644
+--- a/sound/soc/codecs/lpass-va-macro.c
++++ b/sound/soc/codecs/lpass-va-macro.c
+@@ -1713,6 +1713,12 @@ static void va_macro_remove(struct platform_device *pdev)
+ {
+ 	struct va_macro *va = dev_get_drvdata(&pdev->dev);
+ 
++	/* Runtime callbacks must finish before managed clock providers disappear. */
++	pm_runtime_force_suspend(&pdev->dev);
++	/* Balance force_suspend; devm cleanup owns the final disable. */
++	pm_runtime_enable(&pdev->dev);
++	pm_runtime_dont_use_autosuspend(&pdev->dev);
++
+ 	lpass_macro_pds_exit(va->pds);
+ }
+ 
+diff --git a/sound/soc/codecs/lpass-wsa-macro.c b/sound/soc/codecs/lpass-wsa-macro.c
+index 38e37908baf9..d36a43326c85 100644
+--- a/sound/soc/codecs/lpass-wsa-macro.c
++++ b/sound/soc/codecs/lpass-wsa-macro.c
+@@ -2904,6 +2904,15 @@ static const struct of_device_id wsa_macro_dt_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, wsa_macro_dt_match);
+ 
++static void wsa_macro_remove(struct platform_device *pdev)
++{
++	/* Runtime callbacks must finish before managed clock providers disappear. */
++	pm_runtime_force_suspend(&pdev->dev);
++	/* Balance force_suspend; devm cleanup owns the final disable. */
++	pm_runtime_enable(&pdev->dev);
++	pm_runtime_dont_use_autosuspend(&pdev->dev);
++}
++
+ static struct platform_driver wsa_macro_driver = {
+ 	.driver = {
+ 		.name = "wsa_macro",
+@@ -2911,6 +2920,7 @@ static struct platform_driver wsa_macro_driver = {
+ 		.pm = pm_ptr(&wsa_macro_pm_ops),
+ 	},
+ 	.probe = wsa_macro_probe,
++	.remove = wsa_macro_remove,
+ };
+ 
+ module_platform_driver(wsa_macro_driver);
+-- 
+2.55.0
+

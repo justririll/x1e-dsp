@@ -1,0 +1,26 @@
+From 451efb07bf98102d7b7b11d370cbb9105dbee8df Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 3 Oct 2026 19:59:55 +0300
+Subject: [PATCH 3/5] soc: qcom: pmic_glink: defer rpmsg probe until the
+ pmic_glink device exists
+
+---
+ drivers/soc/qcom/pmic_glink.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+index 3042261578aa..49e8c0b61058 100644
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -250,7 +250,7 @@ static int pmic_glink_rpmsg_probe(struct rpmsg_device *rpdev)
+ 	guard(mutex)(&__pmic_glink_lock);
+ 	pg = __pmic_glink;
+ 	if (!pg)
+-		return dev_err_probe(&rpdev->dev, -ENODEV, "no pmic_glink device to attach to\n");
++		return dev_err_probe(&rpdev->dev, -EPROBE_DEFER, "no pmic_glink device to attach to\n");
+ 
+ 	dev_set_drvdata(&rpdev->dev, pg);
+ 	pg->pdr_available = rpdev->id.driver_data;
+-- 
+2.55.0
+

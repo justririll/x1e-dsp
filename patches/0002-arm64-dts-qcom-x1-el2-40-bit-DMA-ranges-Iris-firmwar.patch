@@ -1,0 +1,76 @@
+From 9c1bf13edef3c8a9ddcc312af78849b0c93a71bd Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 3 Oct 2026 18:48:43 +0300
+Subject: [PATCH 2/5] arm64: dts: qcom: x1-el2: 40-bit DMA ranges, Iris
+ firmware SID, SHM bridge self owner (from jglathe tree)
+
+---
+ arch/arm64/boot/dts/qcom/x1-el2.dtso    | 23 +++++++++++++++++++++--
+ include/dt-bindings/firmware/qcom,scm.h |  3 +++
+ 2 files changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-el2.dtso b/arch/arm64/boot/dts/qcom/x1-el2.dtso
+index ee006742d6f3..d05ffb7c15e7 100644
+--- a/arch/arm64/boot/dts/qcom/x1-el2.dtso
++++ b/arch/arm64/boot/dts/qcom/x1-el2.dtso
+@@ -1,4 +1,5 @@
+ // SPDX-License-Identifier: BSD-3-Clause
++#include <dt-bindings/firmware/qcom,scm.h>
+ 
+ /*
+  * x1 specific modifications required to boot in EL2.
+@@ -7,6 +8,15 @@
+ /dts-v1/;
+ /plugin/;
+ 
++
++
++&soc {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	dma-ranges = <0 0 0 0 0x100 0>;
++	ranges = <0 0 0 0 0x100 0>;
++};
++
+ &apss_watchdog {
+ 	status = "okay";
+ };
+@@ -17,8 +27,13 @@ &gpu_zap_shader {
+ };
+ 
+ &iris {
+-	/* TODO: Add video-firmware iommus to start IRIS from EL2 */
+-	status = "disabled";
++	/* Use generic firmware in EL2 and enable it by default */
++//	status = "okay";
++//	firmware-name = "qcom/vpu/vpu30_p4.mbn";
++
++	video-firmware {
++		iommus = <&apps_smmu 0x1942 0x0>;
++	};
+ };
+ 
+ /*
+@@ -67,3 +82,7 @@ &remoteproc_cdsp {
+ &sbsa_watchdog {
+ 	status = "disabled";
+ };
++
++&scm {
++	qcom,shm-bridge-vmid = <QCOM_SCM_VMID_SELF_OWNER>;
++};
+diff --git a/include/dt-bindings/firmware/qcom,scm.h b/include/dt-bindings/firmware/qcom,scm.h
+index 0d29d8d4829c..776d2cad6047 100644
+--- a/include/dt-bindings/firmware/qcom,scm.h
++++ b/include/dt-bindings/firmware/qcom,scm.h
+@@ -37,4 +37,7 @@
+ #define QCOM_SCM_VMID_OEMVM		0x31
+ #define QCOM_SCM_VMID_CP_ADSP_SHARED	0x33
+ 
++/* Special value intended for qcom,shm-bridge-vmid */
++#define QCOM_SCM_VMID_SELF_OWNER	0xffffffff
++
+ #endif
+-- 
+2.55.0
+

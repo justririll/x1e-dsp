@@ -1,0 +1,63 @@
+From a0237d375ee0088f3dee09f316a3857af331e5da Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Fri, 16 Oct 2026 18:55:18 +0300
+Subject: [PATCH 3/3] reset: re-create the reset-gpio device after its GPIO
+ controller rebinds
+
+The ad-hoc reset-gpio auxiliary device is created once, as a child of the GPIO
+controller seen at that time, and then reused forever. If the controller is unbound
+and bound again (the LPASS LPI pinctrl has to go away while the ADSP restarts), the
+lookup returns the old device, which hangs off the dead gpio_device: reset_gpio fails
+to bind ("driver_sysfs_add failed") and WSA884x speakers defer forever with "Failed to
+get reset". Retire such a stale device and create a new one under the current parent.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/reset/core.c | 23 ++++++++++++++++++-----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/reset/core.c b/drivers/reset/core.c
+index 38e189d04d09..1b5b5698bd02 100644
+--- a/drivers/reset/core.c
++++ b/drivers/reset/core.c
+@@ -1058,19 +1058,32 @@ static int __reset_add_reset_gpio_device(struct fwnode_handle *fwnode,
+ 
+ 	guard(mutex)(&reset_gpio_lookup_mutex);
+ 
++	parent = gpio_device_to_device(gdev);
++
+ 	list_for_each_entry(rgpio_dev, &reset_gpio_lookup_list, list) {
+ 		if (fwnode_reference_args_equal(args, &rgpio_dev->ref_args)) {
++			if (rgpio_dev->adev.dev.parent == parent) {
++				/*
++				 * Already on the list, create the device link
++				 * and stop here.
++				 */
++				reset_gpio_add_devlink(fwnode, rgpio_dev);
++				return 0;
++			}
+ 			/*
+-			 * Already on the list, create the device link
+-			 * and stop here.
++			 * The GPIO controller was unbound and bound again (e.g. the
++			 * LPASS LPI pinctrl across an ADSP restart): the old device
++			 * hangs off the dead gpio_device and can never bind again.
++			 * Retire it (its memory is leaked on purpose, see the release
++			 * callback) and create a fresh one below.
+ 			 */
+-			reset_gpio_add_devlink(fwnode, rgpio_dev);
+-			return 0;
++			list_del(&rgpio_dev->list);
++			auxiliary_device_delete(&rgpio_dev->adev);
++			break;
+ 		}
+ 	}
+ 
+ 	lflags = GPIO_PERSISTENT | (flags & GPIO_ACTIVE_LOW);
+-	parent = gpio_device_to_device(gdev);
+ 	properties[prop++] = PROPERTY_ENTRY_STRING("compatible", "reset-gpio");
+ 	properties[prop++] = PROPERTY_ENTRY_GPIO("reset-gpios", parent->fwnode, offset, lflags);
+ 
+-- 
+2.55.0
+
