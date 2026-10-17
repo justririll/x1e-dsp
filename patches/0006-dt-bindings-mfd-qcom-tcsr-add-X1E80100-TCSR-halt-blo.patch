@@ -1,0 +1,31 @@
+From cc88cac373e0f683a38991dd286e449a1aa1ae9e Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:43:38 +0300
+Subject: [PATCH 06/12] dt-bindings: mfd: qcom,tcsr: add X1E80100 TCSR halt
+ block
+
+The TCSR block at 0x01f60000 holds the halt request and acknowledge
+registers of the LPASS and Turing subsystems on X1E80100. The
+compatible "qcom,x1e80100-tcsr" is already taken by the TCSR clock
+controller at 0x01fc0000, so give this block its own one.
+
+Assisted-by: Claude Opus 5.5
+---
+ Documentation/devicetree/bindings/mfd/qcom,tcsr.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/mfd/qcom,tcsr.yaml b/Documentation/devicetree/bindings/mfd/qcom,tcsr.yaml
+index c3889f974ed3..3e1189780109 100644
+--- a/Documentation/devicetree/bindings/mfd/qcom,tcsr.yaml
++++ b/Documentation/devicetree/bindings/mfd/qcom,tcsr.yaml
+@@ -43,6 +43,7 @@ properties:
+           - qcom,sm8250-tcsr
+           - qcom,sm8350-tcsr
+           - qcom,sm8450-tcsr
++          - qcom,x1e80100-tcsr-halt
+           - qcom,tcsr-apq8064
+           - qcom,tcsr-apq8084
+           - qcom,tcsr-ipq5018
+-- 
+2.55.0
+

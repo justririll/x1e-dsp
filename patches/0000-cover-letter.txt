@@ -1,0 +1,58 @@
+Subject: [PATCH RFC 00/12] X1E80100: start the ADSP and CDSP from Linux at EL2
+
+Linux can run at EL2 on X1E80100 laptops (slbounce), without the
+Qualcomm hypervisor (QHEE/Gunyah). Besides KVM, this is what works on
+X1E devices with more than 32 GB of RAM, where the EL1 setup under the
+hypervisor has problems [TODO: link to the report].
+
+The DSPs are the missing piece there. TZ PAS alone cannot start them:
+QHEE sets up clocks, IOMMU apertures and a second (DTB) image around the
+TZ calls. Today people work around this with qebspil, a UEFI driver that
+starts the DSPs before Linux. This series lets qcom_q6v5_adsp start and
+stop both DSPs itself, the way it already does on SDM845 and SC7280:
+copy the images into the carveouts and release the core through the
+QDSP6SS boot FSM. TZ is used once, to stop the ADSP image UEFI leaves
+running.
+
+What X1E80100 needs beyond the SC7280 path, all of which QHEE does
+otherwise:
+
+- a DTB image per DSP, and for the ADSP a descriptor at qdsp6ss+0x60
+  that a reset clears;
+- the Q6 core PLL and core RCG, and the LPASS TCM branch clocks;
+- stop sequences ending in the PDC sync reset and AOSS restart pulse of
+  qcom_adsp_shutdown(), so patches 4-6 and 8-9 add X1E80100 to the PDC
+  and AOSS reset drivers and describe the TCSR halt block;
+- the CDSP runs in a Linux IOMMU domain, so the 103 apertures QHEE grants
+  it are mapped. Bisected on hardware, 19 are needed to boot, the rest
+  (LLCC, BWMON, ...) once the NPU does any work, so all are kept.
+
+The sequences were recovered from the QHEE binary (.367) and the
+register names from the hardware region directory in the DSP firmware.
+Where only the block is known, the offset is used as the name.
+
+Patches 1-3 are prerequisites for EL2 that are not mine (1-2 from the
+jglathe tree) and are only here so the series applies; they need their
+own submission.
+
+Questions:
+
+1. The Q6 core PLL and RCG live inside QDSP6SS and lose their state on
+   every DSP reset, and the CDSP's are only reachable after the boot FSM
+   powers the core. Like the QDSP6SS CBCRs this driver already writes on
+   SDM845, they are programmed from the remoteproc driver. Would a clock
+   provider with a .prepare that reprograms the PLL be preferred?
+2. The ADSP stop powers down the LPASS core and audio clock domains,
+   including the audio PLLs that the LPASS macro drivers use. Should that
+   part move to the LPASS clock/power drivers?
+3. The ADSP DTB descriptor carries chip id, version and platform info.
+   They are module parameters with the values read on one laptop; is
+   there a preferred source (socinfo) for them?
+4. TCSR halt block compatible: "qcom,x1e80100-tcsr" is taken by the TCSR
+   clock controller, so this adds "qcom,x1e80100-tcsr-halt".
+
+Tested on an ASUS Vivobook S15 (S5507QA) with linux-msm/laptops-kernel
+qcom-laptops: both DSPs start from cold boot, restart (CDSP with audio
+loaded; ADSP restart with the audio stack loaded needs more work in the
+audio drivers), battery and audio work, llama.cpp runs on the NPU.
+Only one device; testing on others is very welcome.

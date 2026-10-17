@@ -1,6 +1,6 @@
-From 7db88dbc69523c09ce6d61ecf66e04356b7233f0 Mon Sep 17 00:00:00 2001
+From c6a8663219628cdf7da6532d36174072fe76d509 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 11:19:38 +0300
+Date: Sat, 17 Oct 2026 12:11:03 +0300
 Subject: [PATCH 3/3] reset: re-create the reset-gpio device after its GPIO
  controller rebinds
 

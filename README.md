@@ -9,8 +9,9 @@ CDSP with the stock `qcom_q6v5_adsp` remoteproc driver. Neither qebspil nor TZ
 authentication is needed.
 
 Tested on: ASUS Vivobook S15 S5507QA, `linux-msm/laptops-kernel` branch `qcom-laptops` at
-`65f4ae7320b8` (7.3.0-rc7), ASUS 2026 firmware set (CDSP c1-00079), 2026-10-16. The 5
-patches apply cleanly on that commit, in order.
+`65f4ae7320b8` (7.3.0-rc7), ASUS 2026 firmware set (CDSP c1-00079), 2026-10-17. The 12
+patches apply cleanly on that commit, in order. They are laid out as an RFC series
+(`patches/0000-cover-letter.txt`).
 
 Verified with this driver: both DSPs come up, the battery (battmgr on the ADSP) and the
 speakers work, and llama.cpp runs on the NPU (CDSP, FastRPC). An s2idle cycle
@@ -26,8 +27,11 @@ things that the hypervisor (QHEE) would otherwise do:
 - **Second image.** Each DSP also loads its DTB image into its own carveout. For the ADSP,
   the DTB descriptor at qdsp6ss+0x60..0x74 is rewritten, because a reset clears it.
 - **EVB.** The boot address is the ELF entry point, and the other register bits are kept.
-- **Clock/PLL bring-up and stop sequences.** These were recovered from QHEE (.367) and are
-  replayed as raw MMIO, along with the CDSP IOMMU apertures QHEE grants.
+- **Clock/PLL bring-up and stop sequences.** These were recovered from QHEE (.367). The
+  driver writes them through named registers; the stop ends in the PDC sync reset and AOSS
+  restart pulse of `qcom_adsp_shutdown()`, through the reset framework and `qcom,halt-regs`.
+- **CDSP IOMMU apertures.** The CDSP runs in a Linux IOMMU domain, so the apertures QHEE
+  grants it are mapped.
 - **The ADSP image UEFI leaves running.** It is stopped over SMP2P and PAS shutdown. This is
   the only TZ call, and it also releases that image's carveout protection.
 
@@ -38,13 +42,25 @@ things that the hypervisor (QHEE) would otherwise do:
 | 0001 | tzmem: `qcom,shm-bridge-vmid` self-owner for EL2 (from the jglathe tree) |
 | 0002 | x1-el2 DT: 40-bit DMA ranges, Iris firmware SID, SHM bridge owner (from the jglathe tree) |
 | 0003 | pmic_glink: defer the rpmsg probe until the pmic_glink device exists (battery after DSP start) |
-| 0004 | **remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP/CDSP for Linux at EL2** |
-| 0005 | x1-el2 DT: ADSP/CDSP on `qcom,x1e80100-{adsp,cdsp}-pil` (ADSP streams in bypass, CDSP SID 0x0c00) |
+| 0004–0007 | dt-bindings: PDC and AOSS resets for X1E80100, TCSR halt block, `qcom,x1e80100-{adsp,cdsp}-pil` |
+| 0008–0009 | reset: X1E80100 tables for `reset-qcom-pdc` (audio bit 2, compute bit 7) and `reset-qcom-aoss` |
+| 0010 | **remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP and CDSP for Linux at EL2** |
+| 0011 | hamoa DT: PDC and AOSS reset controllers (reserved), TCSR halt syscon |
+| 0012 | x1-el2 DT: both DSPs on the new compatibles, with their resets and halt registers |
 
-0001/0002 are general EL2 prerequisites (Iris and SCM need them too), not DSP-specific.
+0001–0003 are general EL2 prerequisites, not DSP-specific, and not mine.
 
-`src/qcom_q6v5_adsp.c` is the resulting driver, for reading. It grows from 850 to about 1950
-lines; nearly all of the addition is the X1E register sequences and the aperture table.
+`CONFIG_RESET_QCOM_PDC` must be enabled (`CONFIG_RESET_QCOM_AOSS` usually is).
+
+The bindings pass `dt_binding_check`, the new nodes pass `dtbs_check`, and the series is
+`checkpatch --strict` clean apart from 0001–0003.
+
+The patches carry an `Assisted-by:` tag and **no** `Signed-off-by:`. The kernel's
+`Documentation/process/coding-assistants.rst` says an AI must not add one. Whoever submits
+them adds their own after reviewing (`git format-patch -s` or `git am -s`).
+
+`src/qcom_q6v5_adsp.c` is the resulting driver, for reading. It grows from 850 to about 2000
+lines; most of the addition is the named X1E register sequences and the aperture table.
 
 ### What is actually needed (bisected)
 
@@ -108,15 +124,20 @@ Firmware is loaded from `/lib/firmware` via the DT `firmware-name` entries
 
 - **Partly minimal.** The bring-up was bisected at the level of step groups (see above). Single
   registers inside the needed groups and the stop sequences were not.
-- **Raw clock-controller writes.** The sequences poke GCC/LPASS/NSP registers behind the
-  clock framework's back. For upstream, the PLLs and branch clocks belong in a QDSP6SS clock
-  provider (`clk_alpha_pll`, `clk_rcg2`, `clk_branch`). The generic Lucid OLE configure helper
-  writes the calibration field differently from QHEE, so it can't be reused as is.
+- **Clock registers from the remoteproc driver.** The Q6 PLL/RCG and the LPASS/Turing clock
+  registers are written from `qcom_q6v5_adsp`, by name but behind the clock framework's
+  back. The Q6 PLL sits inside QDSP6SS and loses its state on every DSP reset (the CDSP's is
+  only reachable after the boot FSM powers the core), which is why it is not a clock provider
+  yet; that and the LPASS audio clocks in the ADSP stop are open questions in the cover
+  letter. The generic Lucid OLE configure helper writes the calibration field differently
+  from QHEE, so it can't be reused as is.
+- **Only the needed resets.** The X1E80100 PDC and AOSS reset tables only have the DSP
+  resets; the other bits are unknown.
 - **Raw SMC.** The ADSP stop issues a raw SMC (`0xc2000405`, QUP/GPI channel cleanup) outside
   `qcom_scm`.
 - **Ignored timeouts.** Some timeouts are ignored on purpose, because QHEE ignores them too.
 - **Missing QHEE step.** The CDSP private channel clear that QHEE does is not reproduced.
-- **No DT binding.** There is no binding update for the new compatibles yet.
+- **One device.** Tested on one Vivobook only; the ADSP descriptor values are this laptop's.
 
 ## Restart (`optional-restart/`)
 

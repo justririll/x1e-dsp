@@ -1,0 +1,55 @@
+From 94c74811680da51b37a4abdd900c2415498a89d5 Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:43:39 +0300
+Subject: [PATCH 11/12] arm64: dts: qcom: hamoa: add the PDC and AOSS resets
+ and the TCSR halt block
+
+Describe the PDC_GLOBAL and AOSS_CC_RST_CTL reset controllers and the
+TCSR block with the DSP halt registers. The hypervisor owns the resets
+normally, so the reset controllers are reserved here.
+
+Assisted-by: Claude Opus 5.5
+---
+ arch/arm64/boot/dts/qcom/hamoa.dtsi | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/hamoa.dtsi b/arch/arm64/boot/dts/qcom/hamoa.dtsi
+index ea126db27ff1..8f08642351f9 100644
+--- a/arch/arm64/boot/dts/qcom/hamoa.dtsi
++++ b/arch/arm64/boot/dts/qcom/hamoa.dtsi
+@@ -4023,6 +4023,11 @@ tcsr_mutex: hwlock@1f40000 {
+ 			#hwlock-cells = <1>;
+ 		};
+ 
++		tcsr_halt: syscon@1f60000 {
++			compatible = "qcom,x1e80100-tcsr-halt", "syscon";
++			reg = <0 0x01f60000 0 0x20000>;
++		};
++
+ 		tcsr: clock-controller@1fc0000 {
+ 			compatible = "qcom,x1e80100-tcsr", "syscon";
+ 			reg = <0 0x01fc0000 0 0x30000>;
+@@ -6481,6 +6486,20 @@ pdc: interrupt-controller@b220000 {
+ 			interrupt-controller;
+ 		};
+ 
++		pdc_reset: reset-controller@b5e0000 {
++			compatible = "qcom,x1e80100-pdc-global";
++			reg = <0 0x0b5e0000 0 0x10000>;
++			#reset-cells = <1>;
++			status = "reserved"; /* Owned by the hypervisor */
++		};
++
++		aoss_reset: reset-controller@c2f0000 {
++			compatible = "qcom,x1e80100-aoss-cc";
++			reg = <0 0x0c2f0000 0 0x10000>;
++			#reset-cells = <1>;
++			status = "reserved"; /* Owned by the hypervisor */
++		};
++
+ 		aoss_qmp: power-management@c300000 {
+ 			compatible = "qcom,x1e80100-aoss-qmp", "qcom,aoss-qmp";
+ 			reg = <0 0x0c300000 0 0x400>;
+-- 
+2.55.0
+

@@ -1,0 +1,31 @@
+From 8cf46403809436ae764ef42524e683cae9cd978b Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:43:38 +0300
+Subject: [PATCH 04/12] dt-bindings: reset: qcom,pdc-global: add X1E80100
+
+X1E80100 has the PDC global sync reset of SC7280 at the same offset, but
+with the compute reset on bit 7.
+
+Assisted-by: Claude Opus 5.5
+---
+ Documentation/devicetree/bindings/reset/qcom,pdc-global.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/reset/qcom,pdc-global.yaml b/Documentation/devicetree/bindings/reset/qcom,pdc-global.yaml
+index f514363aa474..8b4c211e9655 100644
+--- a/Documentation/devicetree/bindings/reset/qcom,pdc-global.yaml
++++ b/Documentation/devicetree/bindings/reset/qcom,pdc-global.yaml
+@@ -29,6 +29,10 @@ properties:
+         items:
+           - const: qcom,sdm845-pdc-global
+ 
++      - description: on X1E80100 SoCs the following compatibles must be specified
++        items:
++          - const: qcom,x1e80100-pdc-global
++
+   reg:
+     maxItems: 1
+ 
+-- 
+2.55.0
+
