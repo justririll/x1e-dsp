@@ -144,7 +144,6 @@ struct qcom_adsp {
 	phys_addr_t dtb_mem_reloc;
 	void __iomem *dtb_mem_region;
 	size_t dtb_mem_size;
-	bool test_channel_mapped;
 	unsigned long extra_mapped;
 	DECLARE_BITMAP(qhee_mapped, 128);
 	bool clk_saved;
@@ -577,7 +576,7 @@ static const struct rproc_ops adsp_ops = {
 
 /* TEST ONLY: QHEE .367 E-069 CDSP clock recipe, with bounded waits. */
 
-enum cdsp_test_op { CT_RMW, CT_WRITE, CT_PRESERVE, CT_DELAY };
+enum cdsp_test_op { CT_RMW, CT_WRITE, CT_DELAY };
 struct cdsp_test_step {
 	phys_addr_t addr;
 	u32 clear, set, poll_mask, poll_value, timeout_us;
@@ -590,17 +589,6 @@ struct cdsp_test_step {
 	.poll_mask=(m), .poll_value=(v), .timeout_us=(t), .branch_poll=(b) }
 #define CD(d) { .set=(d), .op=CT_DELAY }
 
-static const struct cdsp_test_step cdsp_setup_steps[] = {
-	CP(0x00145008, 0, 1, BIT(31), 0, 10000, true),
-	CT(0x32008404, 0, 2), CT(0x32008220, 0, 2), CT(0x3200822c, 0, 2),
-	CP(0x32008418, 0, 1, BIT(31), 0, 10000, true),
-	CT(0x32018034, 1, 0), CT(0x32008418, 1, 0),
-	CP(0x32008414, 0, 1, BIT(31), 0, 10000, true),
-	CP(0x32008080, 1, 0, BIT(31), BIT(31), 100000, false),
-	CT(0x32008080, 0, 0x800), CT(0x32008080, 0, 1),
-	{ .addr=0x32300018, .op=CT_PRESERVE }, /* QHEE RAM253c10 unknown */
-	CT(0x32348040, 0, 1),
-};
 static const struct cdsp_test_step cdsp_pll_steps[] = {
 	CT(0x32340010, 0xff, 0x32),
 	CT(0x32340018, ~0xee3c03ffU, 0), CW(0x32340014, 0),
@@ -660,12 +648,6 @@ static int cdsp_test_step(struct qcom_adsp *pas, const char *phase, int n,
 		old = readl(p);
 		dev_dbg(pas->dev, "%s[%d] read completed old=%#010x\n", phase, n, old);
 	}
-	if (s->op == CT_PRESERVE) {
-		dev_dbg(pas->dev, "%s[%d] UNKNOWN QHEE RAM253c10: preserve reg=%#010x, no write\n",
-			 phase, n, old);
-		val = old;
-		goto done;
-	}
 	val = s->op == CT_WRITE ? s->set : (old & ~s->clear) | s->set;
 	dev_dbg(pas->dev, "%s[%d] write before value=%#010x\n", phase, n, val);
 	writel(val, p);
@@ -678,7 +660,6 @@ static int cdsp_test_step(struct qcom_adsp *pas, const char *phase, int n,
 		dev_dbg(pas->dev, "%s[%d] poll after ret=%d value=%#010x\n",
 			 phase, n, ret, val);
 	}
-done:
 	dev_dbg(pas->dev, "%s[%d] after addr=%pa old=%#010x value=%#010x ret=%d\n",
 		 phase, n, &s->addr, old, val, ret);
 	iounmap(p);
@@ -695,36 +676,6 @@ static int cdsp_test_run(struct qcom_adsp *pas, const char *phase,
 			return ret;
 	}
 	return 0;
-}
-
-static int cdsp_test_calibration(struct qcom_adsp *pas)
-{
-	u32 control, lo, hi, t = 0;
-	int ret;
-	struct cdsp_test_step steps[] = {
-		CW(0x32350008, 1), CW(0x32350004, 0x8028550d),
-		CW(0x32350028, 0x9f1), CW(0x32350030, 0x020f9ac0),
-		CW(0x32350038, 0x037d2002), CW(0x323500a4, 0x30),
-		CW(0x323500ac, 0x10000), CW(0x3235003c, 1),
-		CW(0x32350014, 0), CD(1),
-		CW(0x32350014, 0), CD(10), CW(0x32350014, 0), CD(1),
-	};
-	ret = cdsp_test_read(pas, 0x221c2bec, &control);
-	if (ret || !(control & 0x1fe000))
-		return ret;
-	if (control & BIT(16)) {
-		ret = cdsp_test_read(pas, 0x221c2be0, &lo);
-		if (ret)
-			return ret;
-		ret = cdsp_test_read(pas, 0x221c2be4, &hi);
-		if (ret)
-			return ret;
-		t = (lo >> 13) | ((hi & 0x1f) << 19);
-	}
-	steps[8].set = t;
-	steps[10].set = t | BIT(31);
-	steps[12].set = t;
-	return cdsp_test_run(pas, "calibration", steps, ARRAY_SIZE(steps));
 }
 
 static int cdsp_test_enable(struct qcom_adsp *pas)
@@ -763,14 +714,6 @@ static int x1pas_qhee_bringup(struct qcom_adsp *pas, struct rproc *rproc)
 	if ((version >> 28) != 0xa ||
 	    (((version >> 16) & 0xfff) != 9 && ((version >> 16) & 0xfff) != 0x16))
 		return -ENODEV;
-	dev_dbg(pas->dev, "ClockSetup(8,3) before selector=%#x\n", version);
-	ret = cdsp_test_run(pas, "setup", cdsp_setup_steps, ARRAY_SIZE(cdsp_setup_steps));
-	if (!ret && ((version >> 16) & 0xfff) == 9)
-		ret = cdsp_test_calibration(pas);
-	dsb(sy);
-	dev_dbg(pas->dev, "ClockSetup(8,3) after ret=%d\n", ret);
-	if (ret)
-		return ret;
 	entry = (u64)ehdr->e_entry + pas->mem_phys - pas->mem_reloc;
 	ret = cdsp_test_read(pas, 0x32300010, &val);
 	if (ret)
@@ -846,111 +789,117 @@ static void x1pas_map_extra(struct qcom_adsp *pas, struct rproc *rproc, bool map
 	}
 }
 
-/* CDSP (VMID 0x1e) static apertures from QHEE .367, ELF VA 0xccc08: {pa, size, perm} */
+/*
+ * CDSP (VMID 0x1e) static apertures granted by QHEE .367 (table at ELF VA 0xccc08):
+ * {pa, size, perm}, perm bit2 = read, bit1 = write. Names come from the hardware
+ * region directory in the CDSP firmware. "(boot)" marks the entries the CDSP cannot
+ * boot without (bisected on hardware); the others are used at run time, e.g. the
+ * LLCC registers as soon as an HTP session opens, so the whole table is kept.
+ */
 static const struct { u64 pa; u64 size; u32 perm; } qhee_cdsp_map[] = {
-	{ 0x100000, 0x1000, 0x4 },
-	{ 0x101000, 0x1000, 0x4 },
-	{ 0x102000, 0x1000, 0x4 },
-	{ 0x103000, 0x1000, 0x4 },
-	{ 0x104000, 0x1000, 0x4 },
-	{ 0x105000, 0x1000, 0x4 },
-	{ 0x106000, 0x1000, 0x4 },
-	{ 0x107000, 0x1000, 0x4 },
-	{ 0x108000, 0x1000, 0x4 },
-	{ 0x109000, 0x1000, 0x4 },
-	{ 0x10a000, 0x1000, 0x4 },
-	{ 0x10b000, 0x1000, 0x4 },
-	{ 0x118000, 0x1000, 0x6 },
-	{ 0x11e000, 0x1000, 0x6 },
-	{ 0x123000, 0x1000, 0x6 },
-	{ 0x138000, 0x1000, 0x4 },
-	{ 0x142000, 0x1000, 0x6 },
-	{ 0x145000, 0x1000, 0x6 },
-	{ 0x15b000, 0x1000, 0x6 },
-	{ 0x162000, 0x1000, 0x6 },
-	{ 0x1a6000, 0x1000, 0x6 },
-	{ 0x406000, 0x1000, 0x6 },
-	{ 0x446000, 0x1000, 0x6 },
-	{ 0x486000, 0x1000, 0x6 },
-	{ 0x4fc000, 0x1000, 0x4 },
-	{ 0x526000, 0x7000, 0x6 },
-	{ 0x63c000, 0x4000, 0x6 },
-	{ 0x640000, 0x9000, 0x2 },
-	{ 0x650000, 0x9000, 0x2 },
-	{ 0x10ca000, 0x1000, 0x4 },
-	{ 0x17af000, 0x1000, 0x6 },
-	{ 0x1f40000, 0x40000, 0x6 },
-	{ 0x1fc0000, 0x10000, 0x4 },
-	{ 0x1fd1000, 0x1a000, 0x4 },
-	{ 0x1feb000, 0x1000, 0x6 },
-	{ 0x1fec000, 0x4000, 0x4 },
-	{ 0xb2a0000, 0x10000, 0x6 },
-	{ 0xb5f0000, 0x1000, 0x4 },
-	{ 0xbbf0000, 0x2000, 0x4 },
-	{ 0xc20a000, 0x1000, 0x6 },
-	{ 0xc210000, 0x80000, 0x4 },
-	{ 0xc330000, 0x1000, 0x6 },
-	{ 0xc370000, 0x1000, 0x4 },
-	{ 0xc380000, 0x1000, 0x4 },
-	{ 0xc390000, 0x1000, 0x4 },
-	{ 0xc3a0000, 0x1000, 0x4 },
-	{ 0xc3b0000, 0x1000, 0x4 },
-	{ 0xc3c0000, 0x1000, 0x4 },
-	{ 0xc3d0000, 0x1000, 0x4 },
-	{ 0xc3e0000, 0x1000, 0x4 },
-	{ 0xc3f0000, 0x1000, 0x4 },
-	{ 0xc400000, 0x3000, 0x6 },
-	{ 0xc406000, 0x11000, 0x4 },
-	{ 0xc440000, 0x80000, 0x6 },
-	{ 0xf000000, 0x1000000, 0x6 },
-	{ 0x10001000, 0x1000, 0x6 },
-	{ 0x10002000, 0x1000, 0x6 },
-	{ 0x10041000, 0x1000, 0x6 },
-	{ 0x10042000, 0x1000, 0x6 },
-	{ 0x10045000, 0x1000, 0x6 },
-	{ 0x10046000, 0x1000, 0x6 },
-	{ 0x10048000, 0x1000, 0x6 },
-	{ 0x10980000, 0x1000, 0x6 },
-	{ 0x10981000, 0x1000, 0x6 },
-	{ 0x146aa000, 0x1000, 0x6 },
-	{ 0x16000000, 0x1000000, 0x2 },
-	{ 0x20c21000, 0x1000, 0x4 },
-	{ 0x221c2000, 0x1000, 0x4 },
-	{ 0x221c8000, 0x1000, 0x4 },
-	{ 0x24080000, 0x1000, 0x4 },
-	{ 0x240b8000, 0x1000, 0x6 },
-	{ 0x2500a000, 0x1000, 0x6 },
-	{ 0x25011000, 0x1000, 0x6 },
-	{ 0x25021000, 0x1000, 0x4 },
-	{ 0x2520a000, 0x1000, 0x6 },
-	{ 0x25211000, 0x1000, 0x6 },
-	{ 0x25221000, 0x1000, 0x4 },
-	{ 0x2540a000, 0x1000, 0x6 },
-	{ 0x25411000, 0x1000, 0x6 },
-	{ 0x25421000, 0x1000, 0x4 },
-	{ 0x2560a000, 0x1000, 0x6 },
-	{ 0x25611000, 0x1000, 0x6 },
-	{ 0x25621000, 0x1000, 0x4 },
-	{ 0x2580a000, 0x1000, 0x6 },
-	{ 0x25811000, 0x1000, 0x6 },
-	{ 0x25821000, 0x1000, 0x4 },
-	{ 0x25a0a000, 0x1000, 0x6 },
-	{ 0x25a11000, 0x1000, 0x6 },
-	{ 0x25a21000, 0x1000, 0x4 },
-	{ 0x25c0a000, 0x1000, 0x6 },
-	{ 0x25c11000, 0x1000, 0x6 },
-	{ 0x25c21000, 0x1000, 0x4 },
-	{ 0x25e0a000, 0x1000, 0x6 },
-	{ 0x25e11000, 0x1000, 0x6 },
-	{ 0x25e21000, 0x1000, 0x4 },
-	{ 0x2600a000, 0x1000, 0x6 },
-	{ 0x26011000, 0x1000, 0x6 },
-	{ 0x26021000, 0x1000, 0x4 },
-	{ 0x2620a000, 0x1000, 0x6 },
-	{ 0x26211000, 0x1000, 0x6 },
-	{ 0x26221000, 0x1000, 0x4 },
-	{ 0x320cc000, 0x3000, 0x6 },
-	{ 0x322fa000, 0x1000, 0x6 },
+	{ 0x100000, 0x1000, 0x4 },	/*   0 GCC_GPLL0_CM_PLL_LUCID_OLE */
+	{ 0x101000, 0x1000, 0x4 },	/*   1 GCC_GPLL1_CM_PLL_LUCID_OLE */
+	{ 0x102000, 0x1000, 0x4 },	/*   2 GCC_GPLL2_CM_PLL_LUCID_OLE */
+	{ 0x103000, 0x1000, 0x4 },	/*   3 GCC_GPLL3_CM_PLL_LUCID_OLE */
+	{ 0x104000, 0x1000, 0x4 },	/*   4 GCC_GPLL4_CM_PLL_LUCID_OLE */
+	{ 0x105000, 0x1000, 0x4 },	/*   5 GCC_GPLL5_CM_PLL_LUCID_OLE */
+	{ 0x106000, 0x1000, 0x4 },	/*   6 GCC_GPLL6_CM_PLL_LUCID_OLE */
+	{ 0x107000, 0x1000, 0x4 },	/*   7 GCC_GPLL7_CM_PLL_LUCID_OLE */
+	{ 0x108000, 0x1000, 0x4 },	/*   8 GCC_GPLL8_CM_PLL_LUCID_OLE */
+	{ 0x109000, 0x1000, 0x4 },	/*   9 GCC_GPLL9_CM_PLL_LUCID_OLE */
+	{ 0x10a000, 0x1000, 0x4 },	/*  10 GCC_GPLL10_CM_PLL_ZONDA_OLE */
+	{ 0x10b000, 0x1000, 0x4 },	/*  11 GCC_GPLL11_CM_PLL_ZONDA_OLE */
+	{ 0x118000, 0x1000, 0x6 },	/*  12 GCC QUPv3 wrapper 1 (boot) */
+	{ 0x11e000, 0x1000, 0x6 },	/*  13 GCC QUPv3 wrapper 2 (boot) */
+	{ 0x123000, 0x1000, 0x6 },	/*  14 GCC_CLK_CTL_REG */
+	{ 0x138000, 0x1000, 0x4 },	/*  15 GCC_CLK_CTL_REG */
+	{ 0x142000, 0x1000, 0x6 },	/*  16 GCC QUPv3 wrapper 0 (boot) */
+	{ 0x145000, 0x1000, 0x6 },	/*  17 GCC_CLK_CTL_REG */
+	{ 0x15b000, 0x1000, 0x6 },	/*  18 GCC_CLK_CTL_REG */
+	{ 0x162000, 0x1000, 0x6 },	/*  19 GCC_CLK_CTL_REG */
+	{ 0x1a6000, 0x1000, 0x6 },	/*  20 GCC_CLK_CTL_REG */
+	{ 0x406000, 0x1000, 0x6 },	/*  21 IPC_CORE (boot) */
+	{ 0x446000, 0x1000, 0x6 },	/*  22 IPC_CORE */
+	{ 0x486000, 0x1000, 0x6 },	/*  23 IPC_CORE */
+	{ 0x4fc000, 0x1000, 0x4 },	/*  24 IPC_CONFIG */
+	{ 0x526000, 0x7000, 0x6 },	/*  25 unnamed */
+	{ 0x63c000, 0x4000, 0x6 },	/*  26 NSP_CX_CPR3 (boot) */
+	{ 0x640000, 0x9000, 0x2 },	/*  27 unnamed */
+	{ 0x650000, 0x9000, 0x2 },	/*  28 unnamed */
+	{ 0x10ca000, 0x1000, 0x4 },	/*  29 RNG_EE10_EE10_PRNG_SUB (boot) */
+	{ 0x17af000, 0x1000, 0x6 },	/*  30 MMSS NoC */
+	{ 0x1f40000, 0x40000, 0x6 },	/*  31 TCSR_TCSR_MUTEX (boot) */
+	{ 0x1fc0000, 0x10000, 0x4 },	/*  32 TCSR_TCSR_REGS (boot) */
+	{ 0x1fd1000, 0x1a000, 0x4 },	/*  33 TCSR_TCSR_REGS (boot) */
+	{ 0x1feb000, 0x1000, 0x6 },	/*  34 TCSR_TCSR_REGS (boot) */
+	{ 0x1fec000, 0x4000, 0x4 },	/*  35 TCSR_TCSR_REGS */
+	{ 0xb2a0000, 0x10000, 0x6 },	/*  36 RPMH_PDC_COMPUTE_COMPUTE_PDC (boot) */
+	{ 0xb5f0000, 0x1000, 0x4 },	/*  37 RPMH_PDC_PDC_WRAPPER (boot) */
+	{ 0xbbf0000, 0x2000, 0x4 },	/*  38 RPMH_BCM_BCM_TOP (boot) */
+	{ 0xc20a000, 0x1000, 0x6 },	/*  39 RPMH_CPRF_CPRF (boot) */
+	{ 0xc210000, 0x80000, 0x4 },	/*  40 AOSS_PERIPHERALS */
+	{ 0xc330000, 0x1000, 0x6 },	/*  41 AOP_SS_MSG_RAM (boot) */
+	{ 0xc370000, 0x1000, 0x4 },	/*  42 AOP_SS_MSG_RAM */
+	{ 0xc380000, 0x1000, 0x4 },	/*  43 AOP_SS_MSG_RAM */
+	{ 0xc390000, 0x1000, 0x4 },	/*  44 AOP_SS_MSG_RAM */
+	{ 0xc3a0000, 0x1000, 0x4 },	/*  45 AOP_SS_MSG_RAM */
+	{ 0xc3b0000, 0x1000, 0x4 },	/*  46 AOP_SS_MSG_RAM */
+	{ 0xc3c0000, 0x1000, 0x4 },	/*  47 AOP_SS_MSG_RAM */
+	{ 0xc3d0000, 0x1000, 0x4 },	/*  48 AOP_SS_MSG_RAM */
+	{ 0xc3e0000, 0x1000, 0x4 },	/*  49 AOP_SS_MSG_RAM */
+	{ 0xc3f0000, 0x1000, 0x4 },	/*  50 AOP_SS_MSG_RAM (boot) */
+	{ 0xc400000, 0x3000, 0x6 },	/*  51 PMIC_ARB_CORE */
+	{ 0xc406000, 0x11000, 0x4 },	/*  52 PMIC_ARB_MGPI */
+	{ 0xc440000, 0x80000, 0x6 },	/*  53 PMIC_ARB_CORE_REGISTERS_OBS */
+	{ 0xf000000, 0x1000000, 0x6 },	/*  54 TLMM */
+	{ 0x10001000, 0x1000, 0x6 },	/*  55 QDSS_CSR */
+	{ 0x10002000, 0x1000, 0x6 },	/*  56 QDSS_CXSTM_8_32_32_TRUE */
+	{ 0x10041000, 0x1000, 0x6 },	/*  57 QDSS_IN_FUN0_IN_FUN0_CXATBFUNNEL_128W8SP */
+	{ 0x10042000, 0x1000, 0x6 },	/*  58 QDSS_IN_FUN1_IN_FUN1_CXATBFUNNEL_128W8SP */
+	{ 0x10045000, 0x1000, 0x6 },	/*  59 QDSS_MERG_FUN_MERG_FUN_CXATBFUNNEL_128W2SP */
+	{ 0x10046000, 0x1000, 0x6 },	/*  60 QDSS_REPL64_REPL64_CXATBREPLICATOR_64WP */
+	{ 0x10048000, 0x1000, 0x6 },	/*  61 QDSS_ETR_ETR_CXTMC_R64W32D */
+	{ 0x10980000, 0x1000, 0x6 },	/*  62 QDSS_TURING_APB_TURING_TPDM0_TPDM0_TPDM_ATB32_APCLK_DSB128_CSD9C89B96 */
+	{ 0x10981000, 0x1000, 0x6 },	/*  63 QDSS_TURING_APB_TURING_TPDM1_TPDM1_TPDM_ATB32_APCLK_CMB32_CSE533A018 */
+	{ 0x146aa000, 0x1000, 0x6 },	/*  64 boot IMEM (shared) */
+	{ 0x16000000, 0x1000000, 0x2 },	/*  65 QDSS STM stimulus */
+	{ 0x20c21000, 0x1000, 0x4 },	/*  66 security/boot policy status */
+	{ 0x221c2000, 0x1000, 0x4 },	/*  67 TME_FUSECONTROLLER */
+	{ 0x221c8000, 0x1000, 0x4 },	/*  68 QFPROM (boot) */
+	{ 0x24080000, 0x1000, 0x4 },	/*  69 DDR_REG_DDR_SS_REGS */
+	{ 0x240b8000, 0x1000, 0x6 },	/*  70 CDSP_BWMON_THROTTLE_BWMON_WRAPPER_2 (boot) */
+	{ 0x2500a000, 0x1000, 0x6 },	/*  71 LLCC0_TRP */
+	{ 0x25011000, 0x1000, 0x6 },	/*  72 LLCC0_TRP */
+	{ 0x25021000, 0x1000, 0x4 },	/*  73 LLCC0_TRP */
+	{ 0x2520a000, 0x1000, 0x6 },	/*  74 LLCC1_TRP */
+	{ 0x25211000, 0x1000, 0x6 },	/*  75 LLCC1_TRP */
+	{ 0x25221000, 0x1000, 0x4 },	/*  76 LLCC1_TRP */
+	{ 0x2540a000, 0x1000, 0x6 },	/*  77 LLCC2_TRP */
+	{ 0x25411000, 0x1000, 0x6 },	/*  78 LLCC2_TRP */
+	{ 0x25421000, 0x1000, 0x4 },	/*  79 LLCC2_TRP */
+	{ 0x2560a000, 0x1000, 0x6 },	/*  80 LLCC3_TRP */
+	{ 0x25611000, 0x1000, 0x6 },	/*  81 LLCC3_TRP */
+	{ 0x25621000, 0x1000, 0x4 },	/*  82 LLCC3_TRP */
+	{ 0x2580a000, 0x1000, 0x6 },	/*  83 LLCC4_TRP */
+	{ 0x25811000, 0x1000, 0x6 },	/*  84 LLCC4_TRP */
+	{ 0x25821000, 0x1000, 0x4 },	/*  85 LLCC4_TRP */
+	{ 0x25a0a000, 0x1000, 0x6 },	/*  86 LLCC5_TRP */
+	{ 0x25a11000, 0x1000, 0x6 },	/*  87 LLCC5_TRP */
+	{ 0x25a21000, 0x1000, 0x4 },	/*  88 LLCC5_TRP */
+	{ 0x25c0a000, 0x1000, 0x6 },	/*  89 LLCC6_TRP */
+	{ 0x25c11000, 0x1000, 0x6 },	/*  90 LLCC6_TRP */
+	{ 0x25c21000, 0x1000, 0x4 },	/*  91 LLCC6_TRP */
+	{ 0x25e0a000, 0x1000, 0x6 },	/*  92 LLCC7_TRP */
+	{ 0x25e11000, 0x1000, 0x6 },	/*  93 LLCC7_TRP */
+	{ 0x25e21000, 0x1000, 0x4 },	/*  94 LLCC7_TRP */
+	{ 0x2600a000, 0x1000, 0x6 },	/*  95 LLCC_BROADCAST_ORTRP */
+	{ 0x26011000, 0x1000, 0x6 },	/*  96 LLCC_BROADCAST_ORTRP */
+	{ 0x26021000, 0x1000, 0x4 },	/*  97 LLCC_BROADCAST_ORTRP */
+	{ 0x2620a000, 0x1000, 0x6 },	/*  98 LLCC_BROADCAST_ANDTRP (boot) */
+	{ 0x26211000, 0x1000, 0x6 },	/*  99 LLCC_BROADCAST_ANDTRP */
+	{ 0x26221000, 0x1000, 0x4 },	/* 100 LLCC_BROADCAST_ANDTRP */
+	{ 0x320cc000, 0x3000, 0x6 },	/* 101 NSP NoC */
+	{ 0x322fa000, 0x1000, 0x6 },	/* 102 TURING_VAPSS_NOC_VAPSS_NOC_VAPSS_NOC */
 };
 
 static_assert(ARRAY_SIZE(qhee_cdsp_map) <= QHEE_CDSP_MAP_MAX);
@@ -987,21 +936,15 @@ static void x1pas_map_qhee(struct qcom_adsp *pas, struct rproc *rproc)
 		 ARRAY_SIZE(qhee_cdsp_map), fails);
 }
 
-/* Undo x1pas_map_qhee() and the test channel mapping done in start() */
+/* Undo x1pas_map_qhee() */
 static void x1pas_unmap_qhee(struct qcom_adsp *pas, struct rproc *rproc)
 {
 	int i;
 
 	if (!x1pas_has_domain(rproc)) {
-		pas->test_channel_mapped = false;
 		pas->extra_mapped = 0;
 		bitmap_zero(pas->qhee_mapped, QHEE_CDSP_MAP_MAX);
 		return;
-	}
-
-	if (pas->test_channel_mapped) {
-		iommu_unmap(rproc->domain, 0x827dc000, 0x2000);
-		pas->test_channel_mapped = false;
 	}
 
 	for_each_set_bit(i, pas->qhee_mapped, ARRAY_SIZE(qhee_cdsp_map)) {
@@ -1191,10 +1134,11 @@ static int live_adsp_shutdown(struct qcom_adsp *pas)
 	u32 v;
 	int ret, i;
 	dev_dbg(pas->dev, "ADSP-LIVE hardware shutdown begin\n");
-	/* Original a3e58 -> 7d714(0), BLSP permission cleanup before ClockStop. */
+	/* QUP/GPI channel cleanup before the clock stop: SiP svc 4 cmd 5, one value argument (0) */
 	arm_smccc_smc(0xc2000405, 1, 0, 0, 0, 0, 0, 0, &res);
-	dev_dbg(pas->dev, "ADSP-LIVE BLSP SMC c2000405(1,0)=%lx,%lx\n", res.a0, res.a1);
-	if (res.a0) return -EIO;
+	/* QHEE only logs a failure here and still runs the clock stop */
+	if (res.a0)
+		dev_warn(pas->dev, "BLSP cleanup SMC failed: %lx\n", res.a0);
 	AR(0x07e00000,v);
 	if (v & BIT(31)) {
 		AR(0x07e02000,v); if(v&1) AW(0x07e02000,0);
@@ -1269,22 +1213,11 @@ static int live_adsp_bringup(struct qcom_adsp *pas)
 	AR(0x01fc8000,v); if(v != 0xa0090201) return -ENODEV;
 	/* QHEE RAM253c08 unavailable: preserve UEFI's live boot configuration. */
 	AR(0x06800018,boot_config);
-	AB(0x00147160);
-	AR(0x07436090,v);
-	if(v&4) AO(0x06e21008,1,0); else AB(0x06e21008);
-	AB(0x06e21034);
-	AO(0x00147010,0,BIT(20)); AO(0x06848020,0,1);
 	AW(0x06800018,boot_config); AW(0x07250018,8); AB(0x0726a300);
 	for(i=0;i<10;i++) {
 		u32 a=0x0726a000+i*4;
 		AO(a,~0x81c0300fU,0x4000);
 		AO(a,~0x81c0700eU,1);
-	}
-	if(boot_config) {
-		AO(0x06e12020,0,1); AO(0x06e12014,0,1);
-		AO(0x07255014,0,4); AO(0x07255018,0,4); AO(0x07255020,0,4);
-		ret=adsp_wait(pas,0x07255020,1,1,1500);
-		dev_dbg(pas->dev,"ADSP-LIVE optional config wait=%d\n",ret);
 	}
 	/* Same PLL descriptor as b1820: L=50, output mask0xc, RCGR=0x201. */
 	AO(0x06840010,0xff,0x32); AO(0x06840018,~0xee3c03ffU,0); AW(0x06840014,0);
@@ -1316,7 +1249,7 @@ static int live_adsp_bringup(struct qcom_adsp *pas)
 	dev_dbg(pas->dev,"ADSP-LIVE restored DTB entry=%llx size=%llx chip=%x/%x/%x\n",
 		dtb_entry,ALIGN(high,4096)-low,adsp_chip_ids,adsp_chip_version,adsp_platform_info);
 	AR(0x06800010,v); AW(0x06800010,(v&0xf000000f)|(((entry>>8)&0xffffff)<<4));
-	AO(0x0725b000,1,0); dsb(sy);
+	dsb(sy);
 	AW(0x0680001c,0); AO(0x06800400,0,1); AW(0x06800404,1);
 	{
 		void __iomem *p=ioremap(0x06800408,4);
@@ -1370,7 +1303,8 @@ static int live_cdsp_shutdown(struct qcom_adsp *pas)
 	if (ret) return ret;
 	ret = cdsp_test_read(pas, 0x01f74014, &c);
 	if (ret) return ret;
-	if (!((a & b & c) & 1)) {
+	/* Like QHEE: halt the NSP NoC only if it is up and not idle yet */
+	if ((a & 1) && (!(b & 1) || !(c & 1))) {
 		p = ioremap(0x01f74000, 8);
 		if (!p) return -ENOMEM;
 		writel(readl(p) | 1, p);
@@ -1485,14 +1419,6 @@ static int x1e_start(struct rproc *rproc)
 
 	if (cdsp) {
 		x1pas_map_qhee(pas, rproc);
-		if (x1pas_has_domain(rproc)) {
-			/* QHEE private channel page */
-			ret = iommu_map(rproc->domain, 0x827dc000, 0x827dc000, 0x2000,
-					IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
-			if (ret)
-				goto unmap;
-			pas->test_channel_mapped = true;
-		}
 		ret = x1pas_clk_save(pas);
 		if (!ret)
 			ret = x1pas_qhee_bringup(pas, rproc);

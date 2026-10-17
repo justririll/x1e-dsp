@@ -43,8 +43,51 @@ things that the hypervisor (QHEE) would otherwise do:
 
 0001/0002 are general EL2 prerequisites (Iris and SCM need them too), not DSP-specific.
 
-`src/qcom_q6v5_adsp.c` is the resulting driver, for reading. It grows from 850 to about 2000
-lines; nearly all of the addition is the X1E register sequences.
+`src/qcom_q6v5_adsp.c` is the resulting driver, for reading. It grows from 850 to about 1950
+lines; nearly all of the addition is the X1E register sequences and the aperture table.
+
+### What is actually needed (bisected)
+
+Each group of QHEE steps was switched off one at a time. A group is "needed" if the DSP then
+fails to start. Groups that were not needed were also dropped together and re-tested with a
+cold start plus a stop/start of both DSPs, so they don't just rely on clocks UEFI left on.
+
+| DSP | Needed | Dropped (not needed) |
+|---|---|---|
+| CDSP | the 103 IOMMU apertures QHEE grants, SMEM + cmd-db in its IOMMU domain, PLL | branch-clock setup, calibration, QHEE private channel page |
+| ADSP | 10 registers at 0x0726a000 + 0x07250018/0x0726a300, PLL, DTB descriptor | GCC/LPASS branch clocks (0x00147160, 0x06e21008/34, 0x00147010, 0x06848020), optional boot-config block, 0x0725b000 clear |
+
+The stop sequences were not bisected.
+
+### CDSP apertures
+
+The apertures were also bisected one by one. The CDSP needs 19 of the 103 to boot: QUPv3
+wrapper clock pages, IPC_CORE, NSP CX CPR, PRNG, the TCSR mutex and registers, RPMh PDC/BCM/CPRF,
+AOP message RAM, QFPROM, the CDSP BWMON and an LLCC broadcast register. With only those 19, the
+CDSP boots and restarts, but it crashes as soon as an HTP (NPU) session opens: it touches the
+LLCC registers, and from then on even its restarts fault there. So the driver keeps the whole
+table. Each entry is named in the source, and [`cdsp-apertures.csv`](cdsp-apertures.csv) lists
+the name and bisection result for every one. The names come from the hardware region directory
+inside the CDSP firmware, not from guesses.
+
+### What the registers are
+
+The ADSP bring-up writes are standard Qualcomm clock-controller registers:
+
+| Write | Register |
+|---|---|
+| `0x0726a000 + 4*n`, n = 0..9 | TCM block branch clocks (CBCRs) |
+| `0x0726a300` | `AXIS_HS_CBCR` |
+| `0x07250018` | `RSC_WAIT_EVENT_OVRD_MASK` |
+| `0x06840000..0x06840038` | QDSP6SS Lucid OLE PLL (the CDSP has the same PLL type at `0x32340000`) |
+| `0x06848000/04/20` | Q6 core RCG (command/config) and core branch clock |
+
+The descriptor at qdsp6ss+0x60..0x74 holds the DTB entry address, chip id, chip version,
+platform info and image size. EVB writes keep bits 31:28 and 3:0.
+
+The stop paths follow QHEE in two places that an earlier version got wrong: the NSP NoC halt is
+requested only when the NoC is up and not idle yet, and a failed QUP/GPI cleanup SMC
+(`0xc2000405`, SiP service 4 command 5) no longer aborts the ADSP stop halfway.
 
 Kernel config: `CONFIG_QCOM_Q6V5_ADSP=m` (it now selects `QCOM_PAS`). Boot the `-el2.dtb`
 with slbounce as usual, and **remove qebspil from the ESP**.
@@ -63,22 +106,24 @@ Firmware is loaded from `/lib/firmware` via the DT `firmware-name` entries
 
 ## Not done / honest notes
 
-- **Not minimal.** The QHEE sequences are carried over whole. The real minimum is very
-  likely much smaller, and bisecting the steps is the next job.
+- **Partly minimal.** The bring-up was bisected at the level of step groups (see above). Single
+  registers inside the needed groups and the stop sequences were not.
 - **Raw clock-controller writes.** The sequences poke GCC/LPASS/NSP registers behind the
-  clock framework's back. For upstream they belong in clock-controller drivers with real
-  register names.
-- **Raw SMC.** The ADSP stop issues a raw SMC (`0xc2000405`, BLSP permissions) outside `qcom_scm`.
+  clock framework's back. For upstream, the PLLs and branch clocks belong in a QDSP6SS clock
+  provider (`clk_alpha_pll`, `clk_rcg2`, `clk_branch`). The generic Lucid OLE configure helper
+  writes the calibration field differently from QHEE, so it can't be reused as is.
+- **Raw SMC.** The ADSP stop issues a raw SMC (`0xc2000405`, QUP/GPI channel cleanup) outside
+  `qcom_scm`.
 - **Ignored timeouts.** Some timeouts are ignored on purpose, because QHEE ignores them too.
-- **Missing QHEE steps.** Two steps are not reproduced: an unknown RAM value, and a private
-  channel clear.
+- **Missing QHEE step.** The CDSP private channel clear that QHEE does is not reproduced.
 - **No DT binding.** There is no binding update for the new compatibles yet.
 
 ## Restart (`optional-restart/`)
 
 `echo stop/start > /sys/class/remoteproc/remoteprocN/state` works for the **CDSP**.
 
-ADSP restart is **not finished**. The audio stack has to be detached first (that is what
+The ADSP itself also stops and starts fine when the audio stack is not loaded (tested with
+`module_blacklist`). With audio loaded, ADSP restart is **not finished**. The audio stack has to be detached first (that is what
 `restart-adsp73.py` does). These patches (a separate 3-patch series, applied on top of
 `patches/`) fix what broke along the way:
 

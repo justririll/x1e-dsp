@@ -1,4 +1,4 @@
-From e950a0b4309cce7ea568f310d5dbc26facee52c5 Mon Sep 17 00:00:00 2001
+From dfa308b3b43552fa3c49596b9280e58f2c80649a Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Fri, 16 Oct 2026 18:55:18 +0300
 Subject: [PATCH 3/3] reset: re-create the reset-gpio device after its GPIO
