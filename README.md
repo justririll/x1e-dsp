@@ -141,8 +141,7 @@ checks the SoC id register for an X1E part.
   `qcom_scm`.
 - **Ignored timeouts.** Some timeouts are ignored on purpose, because QHEE ignores them too.
 - **Missing QHEE step.** The CDSP private channel clear that QHEE does is not reproduced.
-- **Few devices.** Tested here on one Vivobook; an earlier version was also reported working
-  on a Surface Pro 11.
+- **One device.** Tested on one Vivobook only.
 
 ## Restart (`optional-restart/`)
 
