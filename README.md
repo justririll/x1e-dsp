@@ -17,6 +17,10 @@ Verified with this driver: both DSPs come up, the battery (battmgr on the ADSP) 
 speakers work, and llama.cpp runs on the NPU (CDSP, FastRPC). An s2idle cycle
 (`pm_test=platform`) resumes with both DSPs running; a real overnight sleep is not tested yet.
 
+There are two versions. `patches/` (12 patches) programs the Q6 core PLL from the
+remoteproc driver; [`clk-provider/`](clk-provider/) (17 patches) moves it into a clock
+provider in `drivers/clk/qcom`. Both are tested; which one goes upstream is open.
+
 ## How it works
 
 Like `qcom_q6v5_adsp` already does for SDM845/SC7280, Linux copies the image into the

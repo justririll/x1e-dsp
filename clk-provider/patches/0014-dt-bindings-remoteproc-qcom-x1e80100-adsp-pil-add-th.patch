@@ -1,0 +1,54 @@
+From 92f30182e3fdea895c5c1db72bbbbdc491861851 Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 13:16:18 +0300
+Subject: [PATCH 14/17] dt-bindings: remoteproc: qcom,x1e80100-adsp-pil: add
+ the Q6 core clock
+
+The Q6 core clock of both DSPs now comes from the QDSP6SS Q6 core clock
+controller.
+
+Assisted-by: Claude Opus 5.5
+---
+ .../bindings/remoteproc/qcom,x1e80100-adsp-pil.yaml       | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/remoteproc/qcom,x1e80100-adsp-pil.yaml b/Documentation/devicetree/bindings/remoteproc/qcom,x1e80100-adsp-pil.yaml
+index 74c67cb0ff80..214c8cc9c0cc 100644
+--- a/Documentation/devicetree/bindings/remoteproc/qcom,x1e80100-adsp-pil.yaml
++++ b/Documentation/devicetree/bindings/remoteproc/qcom,x1e80100-adsp-pil.yaml
+@@ -42,10 +42,12 @@ properties:
+   clocks:
+     items:
+       - description: XO clock
++      - description: Q6 core clock from the Q6SS clock controller
+ 
+   clock-names:
+     items:
+       - const: xo
++      - const: core
+ 
+   power-domains:
+     minItems: 2
+@@ -163,6 +165,7 @@ additionalProperties: false
+ examples:
+   - |
+     #include <dt-bindings/clock/qcom,rpmh.h>
++    #include <dt-bindings/clock/qcom,x1e80100-q6sscc.h>
+     #include <dt-bindings/interrupt-controller/arm-gic.h>
+     #include <dt-bindings/interrupt-controller/irq.h>
+     #include <dt-bindings/power/qcom,rpmhpd.h>
+@@ -180,8 +183,9 @@ examples:
+                               <&smp2p_cdsp_in 3 IRQ_TYPE_EDGE_RISING>;
+         interrupt-names = "wdog", "fatal", "ready", "handover", "stop-ack";
+ 
+-        clocks = <&rpmhcc RPMH_CXO_CLK>;
+-        clock-names = "xo";
++        clocks = <&rpmhcc RPMH_CXO_CLK>,
++                 <&cdsp_q6sscc Q6SSCC_Q6_CORE_CLK_SRC>;
++        clock-names = "xo", "core";
+ 
+         power-domains = <&rpmhpd RPMHPD_CX>,
+                         <&rpmhpd RPMHPD_MXC>,
+-- 
+2.55.0
+

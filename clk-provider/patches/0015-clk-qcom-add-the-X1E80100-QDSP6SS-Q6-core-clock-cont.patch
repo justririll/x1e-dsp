@@ -1,0 +1,342 @@
+From dfa5044046e45dba25268fc2d1b90aa5021325a2 Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:59:42 +0300
+Subject: [PATCH 15/17] clk: qcom: add the X1E80100 QDSP6SS Q6 core clock
+ controller
+
+The Q6 core PLL (Lucid OLE) and core RCG of the X1E80100 ADSP and CDSP sit
+inside the QDSP6 subsystem. They lose their state on every subsystem
+reset, and the CDSP ones can only be accessed after the boot FSM powered
+the core up. So the provider never reads the hardware on its own: the
+PLL is programmed in .prepare every time, the rate comes from the L value
+it is programmed with, and turning it off is left to the subsystem reset
+the remoteproc driver does when it stops the DSP. Both clocks are marked
+CLK_IGNORE_UNUSED for the same reason.
+
+The PLL sequence is the hypervisor (QHEE) one. It differs from
+clk_lucid_ole_pll_configure() in its calibration handshake, in writing
+only CAL_L in the upper L_VAL bits and in enabling only the main output.
+
+Assisted-by: Claude Opus 5.5
+---
+ drivers/clk/qcom/Kconfig           |   9 +
+ drivers/clk/qcom/Makefile          |   1 +
+ drivers/clk/qcom/q6sscc-x1e80100.c | 274 +++++++++++++++++++++++++++++
+ 3 files changed, 284 insertions(+)
+ create mode 100644 drivers/clk/qcom/q6sscc-x1e80100.c
+
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 40b595acb686..2d9d2d61398f 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -284,6 +284,15 @@ config CLK_X1E80100_GPUCC
+ 	  Say Y if you want to support graphics controller devices and
+ 	  functionality such as 3D graphics.
+ 
++config CLK_X1E80100_Q6SSCC
++	tristate "X1E80100 QDSP6SS Q6 core clock controller"
++	depends on ARM64 || COMPILE_TEST
++	help
++	  Support for the Q6 core PLL and RCG of the ADSP and CDSP on X1E80100,
++	  for Linux running at EL2 without the Qualcomm hypervisor, where the
++	  remoteproc driver starts the DSPs itself.
++	  Say Y or M if you want to use the DSPs at EL2.
++
+ config CLK_X1E80100_TCSRCC
+ 	tristate "X1E80100 TCSR Clock Controller"
+ 	depends on ARM64 || COMPILE_TEST
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index daf25d583be2..8488f124a59b 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -52,6 +52,7 @@ obj-$(CONFIG_CLK_X1E80100_CAMCC) += camcc-x1e80100.o
+ obj-$(CONFIG_CLK_X1E80100_DISPCC) += dispcc-x1e80100.o
+ obj-$(CONFIG_CLK_X1E80100_GCC) += gcc-x1e80100.o
+ obj-$(CONFIG_CLK_X1E80100_GPUCC) += gpucc-x1e80100.o
++obj-$(CONFIG_CLK_X1E80100_Q6SSCC) += q6sscc-x1e80100.o
+ obj-$(CONFIG_CLK_X1E80100_TCSRCC) += tcsrcc-x1e80100.o
+ obj-$(CONFIG_CLK_X1P42100_CAMCC) += camcc-x1p42100.o
+ obj-$(CONFIG_CLK_X1P42100_GPUCC) += gpucc-x1p42100.o
+diff --git a/drivers/clk/qcom/q6sscc-x1e80100.c b/drivers/clk/qcom/q6sscc-x1e80100.c
+new file mode 100644
+index 000000000000..a5f3ebfc7dd8
+--- /dev/null
++++ b/drivers/clk/qcom/q6sscc-x1e80100.c
+@@ -0,0 +1,274 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * X1E80100 QDSP6SS (ADSP and CDSP) Q6 core clock controller, for Linux at EL2.
++ *
++ * The Q6 core PLL (Lucid OLE) and the core RCG sit inside the QDSP6 subsystem.
++ * They lose their state on every subsystem reset, and on the CDSP they can only
++ * be accessed once the boot FSM has powered the core up. So this provider never
++ * reads the hardware on its own: it reprograms the PLL in .prepare, every time,
++ * reports the rate the PLL is programmed for, and leaves turning it off to the
++ * subsystem reset the remoteproc driver does when it stops the DSP.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/clk-provider.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++
++#include <dt-bindings/clock/qcom,x1e80100-q6sscc.h>
++
++#define Q6SSCC_NR_CLKS		(Q6SSCC_Q6_CORE_CLK_SRC + 1)
++
++#define PLL_MODE		0x00
++#define PLL_OPMODE		0x04
++#define PLL_L_VAL		0x10
++#define PLL_ALPHA_VAL		0x14
++#define PLL_USER_CTL		0x18
++#define PLL_USER_CTL_U		0x1c
++#define PLL_CONFIG_CTL		0x20
++#define PLL_CONFIG_CTL_U	0x24
++#define PLL_CONFIG_CTL_U1	0x28
++#define PLL_TEST_CTL		0x2c
++#define PLL_TEST_CTL_U		0x30
++#define PLL_TEST_CTL_U1		0x34
++#define PLL_TEST_CTL_U2		0x38
++
++#define PLL_MODE_OUTCTRL	BIT(0)
++#define PLL_MODE_RESET_N	BIT(2)
++#define PLL_MODE_CAL_DONE	BIT(13)
++#define PLL_MODE_CAL_REQ	BIT(14)
++#define PLL_OPMODE_RUN		1
++#define PLL_USER_CTL_OUT_MAIN	BIT(0)
++#define PLL_USER_CTL_KEEP	0xee3c03ff
++#define PLL_L_VAL_L		GENMASK(7, 0)
++#define PLL_L_VAL_CAL_L		GENMASK(23, 16)
++
++#define Q6_PLL_L		0x32
++#define Q6_PLL_CAL_L		0x44
++
++#define RCG_CMD			0x0
++#define RCG_CFG			0x4
++#define RCG_CMD_UPDATE		BIT(0)
++
++struct q6sscc_desc {
++	u32 core_rcg;		/* core RCG offset */
++	u32 core_rcg_cfg;	/* PLL main output, divide by 1 */
++};
++
++struct q6sscc {
++	void __iomem *base;
++	const struct q6sscc_desc *desc;
++	struct clk_hw pll;
++	struct clk_hw core;
++	struct clk_hw_onecell_data *hw_data;
++	bool pll_on;
++	bool core_on;
++};
++
++/*
++ * QHEE's sequence. It differs from clk_lucid_ole_pll_configure(): there is a
++ * calibration handshake first, only CAL_L is written in the upper L_VAL bits,
++ * and only the main output is enabled.
++ */
++static int q6sscc_pll_prepare(struct clk_hw *hw)
++{
++	struct q6sscc *cc = container_of(hw, struct q6sscc, pll);
++	void __iomem *base = cc->base;
++	u32 val;
++	int ret;
++
++	writel((readl(base + PLL_L_VAL) & ~PLL_L_VAL_L) | Q6_PLL_L, base + PLL_L_VAL);
++	writel(readl(base + PLL_USER_CTL) & PLL_USER_CTL_KEEP, base + PLL_USER_CTL);
++	writel(0, base + PLL_ALPHA_VAL);
++	writel(readl(base + PLL_MODE) | PLL_MODE_RESET_N, base + PLL_MODE);
++
++	writel(readl(base + PLL_MODE) | PLL_MODE_CAL_REQ, base + PLL_MODE);
++	ret = readl_poll_timeout(base + PLL_MODE, val, val & PLL_MODE_CAL_DONE, 1, 100000);
++	if (ret)
++		return ret;
++	writel(readl(base + PLL_MODE) & ~PLL_MODE_CAL_REQ, base + PLL_MODE);
++	ret = readl_poll_timeout(base + PLL_MODE, val, !(val & PLL_MODE_CAL_DONE), 1, 100000);
++	if (ret)
++		return ret;
++	udelay(1);
++
++	writel(0x20485699, base + PLL_CONFIG_CTL);
++	writel(0x00182261, base + PLL_CONFIG_CTL_U);
++	writel(0x82aa299c, base + PLL_CONFIG_CTL_U1);
++	writel(0, base + PLL_TEST_CTL);
++	writel(0x3, base + PLL_TEST_CTL_U);
++	writel(0x9000, base + PLL_TEST_CTL_U1);
++	writel(0x34, base + PLL_TEST_CTL_U2);
++	writel(0, base + PLL_USER_CTL);
++	writel(0x5, base + PLL_USER_CTL_U);
++	val = readl(base + PLL_L_VAL) & ~PLL_L_VAL_CAL_L;
++	writel(val | FIELD_PREP(PLL_L_VAL_CAL_L, Q6_PLL_CAL_L), base + PLL_L_VAL);
++
++	return 0;
++}
++
++static int q6sscc_pll_enable(struct clk_hw *hw)
++{
++	struct q6sscc *cc = container_of(hw, struct q6sscc, pll);
++	void __iomem *base = cc->base;
++
++	writel(PLL_OPMODE_RUN, base + PLL_OPMODE);
++	writel(readl(base + PLL_MODE) | PLL_MODE_RESET_N, base + PLL_MODE);
++	writel(readl(base + PLL_MODE) | PLL_MODE_OUTCTRL, base + PLL_MODE);
++	writel(readl(base + PLL_USER_CTL) | PLL_USER_CTL_OUT_MAIN, base + PLL_USER_CTL);
++	cc->pll_on = true;
++
++	return 0;
++}
++
++/* The subsystem reset on DSP stop turns the PLL off; the block may be unpowered by then */
++static void q6sscc_pll_disable(struct clk_hw *hw)
++{
++	container_of(hw, struct q6sscc, pll)->pll_on = false;
++}
++
++static int q6sscc_pll_is_enabled(struct clk_hw *hw)
++{
++	return container_of(hw, struct q6sscc, pll)->pll_on;
++}
++
++static unsigned long q6sscc_pll_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
++{
++	return parent_rate * Q6_PLL_L;
++}
++
++static const struct clk_ops q6sscc_pll_ops = {
++	.prepare = q6sscc_pll_prepare,
++	.enable = q6sscc_pll_enable,
++	.disable = q6sscc_pll_disable,
++	.is_enabled = q6sscc_pll_is_enabled,
++	.recalc_rate = q6sscc_pll_recalc_rate,
++};
++
++/* Core RCG: switch to the PLL main output at divide by 1 */
++static int q6sscc_core_enable(struct clk_hw *hw)
++{
++	struct q6sscc *cc = container_of(hw, struct q6sscc, core);
++	void __iomem *rcg = cc->base + cc->desc->core_rcg;
++	u32 val;
++	int ret;
++
++	writel(cc->desc->core_rcg_cfg, rcg + RCG_CFG);
++	writel(readl(rcg + RCG_CMD) | RCG_CMD_UPDATE, rcg + RCG_CMD);
++	ret = readl_poll_timeout_atomic(rcg + RCG_CMD, val, !(val & RCG_CMD_UPDATE), 1, 100000);
++	if (!ret)
++		cc->core_on = true;
++
++	return ret;
++}
++
++static void q6sscc_core_disable(struct clk_hw *hw)
++{
++	container_of(hw, struct q6sscc, core)->core_on = false;
++}
++
++static int q6sscc_core_is_enabled(struct clk_hw *hw)
++{
++	return container_of(hw, struct q6sscc, core)->core_on;
++}
++
++static unsigned long q6sscc_core_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
++{
++	return parent_rate;
++}
++
++static const struct clk_ops q6sscc_core_ops = {
++	.enable = q6sscc_core_enable,
++	.disable = q6sscc_core_disable,
++	.is_enabled = q6sscc_core_is_enabled,
++	.recalc_rate = q6sscc_core_recalc_rate,
++};
++
++static int q6sscc_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct clk_parent_data xo = { .index = 0 };
++	struct clk_init_data init = {};
++	const char *name;
++	struct q6sscc *cc;
++	int ret;
++
++	cc = devm_kzalloc(dev, sizeof(*cc), GFP_KERNEL);
++	if (!cc)
++		return -ENOMEM;
++
++	cc->desc = device_get_match_data(dev);
++	cc->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(cc->base))
++		return PTR_ERR(cc->base);
++
++	cc->hw_data = devm_kzalloc(dev, struct_size(cc->hw_data, hws, Q6SSCC_NR_CLKS), GFP_KERNEL);
++	if (!cc->hw_data)
++		return -ENOMEM;
++	cc->hw_data->num = Q6SSCC_NR_CLKS;
++
++	/* Never gate them as unused: their registers may be unpowered */
++	name = devm_kasprintf(dev, GFP_KERNEL, "%s_q6_pll", dev_name(dev));
++	if (!name)
++		return -ENOMEM;
++	init.name = name;
++	init.ops = &q6sscc_pll_ops;
++	init.parent_data = &xo;
++	init.num_parents = 1;
++	init.flags = CLK_IGNORE_UNUSED;
++	cc->pll.init = &init;
++	ret = devm_clk_hw_register(dev, &cc->pll);
++	if (ret)
++		return ret;
++
++	name = devm_kasprintf(dev, GFP_KERNEL, "%s_q6_core_clk_src", dev_name(dev));
++	if (!name)
++		return -ENOMEM;
++	init.name = name;
++	init.ops = &q6sscc_core_ops;
++	init.parent_data = NULL;
++	init.parent_hws = (const struct clk_hw *[]){ &cc->pll };
++	init.flags = CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT;
++	cc->core.init = &init;
++	ret = devm_clk_hw_register(dev, &cc->core);
++	if (ret)
++		return ret;
++
++	cc->hw_data->hws[Q6SSCC_Q6_PLL] = &cc->pll;
++	cc->hw_data->hws[Q6SSCC_Q6_CORE_CLK_SRC] = &cc->core;
++
++	return devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, cc->hw_data);
++}
++
++static const struct q6sscc_desc adsp_q6sscc_desc = {
++	.core_rcg = 0x8000,
++	.core_rcg_cfg = 0x201,
++};
++
++static const struct q6sscc_desc cdsp_q6sscc_desc = {
++	.core_rcg = 0x8020,
++	.core_rcg_cfg = 0x100201,	/* same, under hardware clock control */
++};
++
++static const struct of_device_id q6sscc_match[] = {
++	{ .compatible = "qcom,x1e80100-adsp-q6sscc", .data = &adsp_q6sscc_desc },
++	{ .compatible = "qcom,x1e80100-cdsp-q6sscc", .data = &cdsp_q6sscc_desc },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, q6sscc_match);
++
++static struct platform_driver q6sscc_driver = {
++	.probe = q6sscc_probe,
++	.driver = {
++		.name = "q6sscc-x1e80100",
++		.of_match_table = q6sscc_match,
++	},
++};
++module_platform_driver(q6sscc_driver);
++
++MODULE_DESCRIPTION("Qualcomm X1E80100 QDSP6SS Q6 core clock controller");
++MODULE_LICENSE("GPL");
+-- 
+2.55.0
+

@@ -1,0 +1,69 @@
+From a1dfaa3cb5cd4ab9dfd4de447895f82839286f98 Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:43:39 +0300
+Subject: [PATCH 12/17] arm64: dts: qcom: x1-el2: start ADSP and CDSP from
+ Linux
+
+At EL2 there is no hypervisor to set the DSPs up around TZ PAS, so let
+qcom_q6v5_adsp start them itself. The ADSP streams stay in bypass (no
+iommus), the CDSP keeps its stream 0x0c00 in a Linux IOMMU domain.
+
+Enable the PDC and AOSS reset controllers, which only the hypervisor
+uses otherwise, and give both DSPs their resets and halt registers.
+
+Assisted-by: Claude Opus 5.5
+---
+ arch/arm64/boot/dts/qcom/x1-el2.dtso | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-el2.dtso b/arch/arm64/boot/dts/qcom/x1-el2.dtso
+index d05ffb7c15e7..099e9bb1d0ac 100644
+--- a/arch/arm64/boot/dts/qcom/x1-el2.dtso
++++ b/arch/arm64/boot/dts/qcom/x1-el2.dtso
+@@ -1,5 +1,7 @@
+ // SPDX-License-Identifier: BSD-3-Clause
+ #include <dt-bindings/firmware/qcom,scm.h>
++#include <dt-bindings/reset/qcom,sdm845-aoss.h>
++#include <dt-bindings/reset/qcom,sdm845-pdc.h>
+ 
+ /*
+  * x1 specific modifications required to boot in EL2.
+@@ -68,11 +70,34 @@ &pcie_smmu {
+ };
+ 
+ &remoteproc_adsp {
+-	iommus = <&apps_smmu 0x1000 0x80>;
++	/*
++	 * Started by qcom_q6v5_adsp without TZ PAS. No iommus: the ADSP streams stay in
++	 * bypass as with the hypervisor; a Linux domain with only the carveouts mapped
++	 * makes the ADSP fault on its peripheral accesses.
++	 */
++	compatible = "qcom,x1e80100-adsp-pil";
++	resets = <&pdc_reset PDC_AUDIO_SYNC_RESET>,
++		 <&aoss_reset AOSS_CC_LPASS_RESTART>;
++	reset-names = "pdc_sync", "restart";
++	qcom,halt-regs = <&tcsr_halt 0x2000>;
+ };
+ 
+ &remoteproc_cdsp {
++	/* Started by qcom_q6v5_adsp without TZ PAS */
++	compatible = "qcom,x1e80100-cdsp-pil";
+ 	iommus = <&apps_smmu 0x0c00 0x0>;
++	resets = <&pdc_reset PDC_COMPUTE_SYNC_RESET>,
++		 <&aoss_reset AOSS_CC_TURING_RESTART>;
++	reset-names = "pdc_sync", "restart";
++	qcom,halt-regs = <&tcsr_halt 0x14000>;
++};
++
++&pdc_reset {
++	status = "okay";
++};
++
++&aoss_reset {
++	status = "okay";
+ };
+ 
+ /*
+-- 
+2.55.0
+

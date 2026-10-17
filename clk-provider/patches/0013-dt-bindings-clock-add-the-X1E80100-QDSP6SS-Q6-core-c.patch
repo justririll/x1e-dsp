@@ -1,0 +1,94 @@
+From a56cf0435fb5ada84e6c2c18481dbbdba2010b5d Mon Sep 17 00:00:00 2001
+From: Kirill Mitrofanov <kmitrqq@gmail.com>
+Date: Sat, 17 Oct 2026 12:59:42 +0300
+Subject: [PATCH 13/17] dt-bindings: clock: add the X1E80100 QDSP6SS Q6 core
+ clock controller
+
+The Q6 core PLL and core RCG of the X1E80100 ADSP and CDSP sit inside the
+QDSP6 subsystem. Describe them for Linux at EL2, where no hypervisor
+programs them.
+
+Assisted-by: Claude Opus 5.5
+---
+ .../bindings/clock/qcom,x1e80100-q6sscc.yaml  | 52 +++++++++++++++++++
+ .../dt-bindings/clock/qcom,x1e80100-q6sscc.h  |  9 ++++
+ 2 files changed, 61 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
+ create mode 100644 include/dt-bindings/clock/qcom,x1e80100-q6sscc.h
+
+diff --git a/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml b/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
+new file mode 100644
+index 000000000000..b744fb514d98
+--- /dev/null
++++ b/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
+@@ -0,0 +1,52 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/clock/qcom,x1e80100-q6sscc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm X1E80100 QDSP6SS Q6 core clock controller
++
++maintainers:
++  - Kirill Mitrofanov <kmitrqq@gmail.com>
++
++description: |
++  The Q6 core PLL and core RCG inside the QDSP6 subsystem of the X1E80100
++  ADSP and CDSP. Only Linux running at EL2 without the hypervisor uses it;
++  otherwise the hypervisor programs these clocks.
++
++  See also: include/dt-bindings/clock/qcom,x1e80100-q6sscc.h
++
++properties:
++  compatible:
++    enum:
++      - qcom,x1e80100-adsp-q6sscc
++      - qcom,x1e80100-cdsp-q6sscc
++
++  reg:
++    maxItems: 1
++
++  clocks:
++    items:
++      - description: XO reference clock
++
++  '#clock-cells':
++    const: 1
++
++required:
++  - compatible
++  - reg
++  - clocks
++  - '#clock-cells'
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/qcom,rpmh.h>
++
++    clock-controller@32340000 {
++        compatible = "qcom,x1e80100-cdsp-q6sscc";
++        reg = <0x32340000 0x10000>;
++        clocks = <&rpmhcc RPMH_CXO_CLK>;
++        #clock-cells = <1>;
++    };
+diff --git a/include/dt-bindings/clock/qcom,x1e80100-q6sscc.h b/include/dt-bindings/clock/qcom,x1e80100-q6sscc.h
+new file mode 100644
+index 000000000000..fe8943a5b600
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,x1e80100-q6sscc.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_X1E80100_Q6SSCC_H
++#define _DT_BINDINGS_CLK_QCOM_X1E80100_Q6SSCC_H
++
++#define Q6SSCC_Q6_PLL			0
++#define Q6SSCC_Q6_CORE_CLK_SRC		1
++
++#endif
+-- 
+2.55.0
+
