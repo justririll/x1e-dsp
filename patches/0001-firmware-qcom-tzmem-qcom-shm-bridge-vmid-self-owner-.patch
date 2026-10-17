@@ -1,6 +1,6 @@
-From 5a822d3f7f2a64e3b028705418eeb4f4c9aaf886 Mon Sep 17 00:00:00 2001
+From 732288dc6b20645e039ba42f9ed7857ad80853b0 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 3 Oct 2026 18:48:43 +0300
+Date: Sat, 17 Oct 2026 11:19:37 +0300
 Subject: [PATCH 1/5] firmware: qcom: tzmem: qcom,shm-bridge-vmid self-owner
  for EL2 (from jglathe tree)
 

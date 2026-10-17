@@ -1,6 +1,6 @@
-From ab09ed89d247242f2b8448f8f5dab3f324693bed Mon Sep 17 00:00:00 2001
+From 1b82a9206888124d30d983940d80e8aaa2df451a Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Fri, 16 Oct 2026 20:31:39 +0300
+Date: Sat, 17 Oct 2026 11:19:38 +0300
 Subject: [PATCH 5/5] arm64: dts: qcom: x1-el2: start ADSP and CDSP from Linux
 
 At EL2 there is no hypervisor to set up the DSPs around TZ PAS, so let qcom_q6v5_adsp

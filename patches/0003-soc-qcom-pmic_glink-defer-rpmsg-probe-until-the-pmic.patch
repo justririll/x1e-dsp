@@ -1,6 +1,6 @@
-From 4877cb1d0632ac55f5a47842449297a62413d41f Mon Sep 17 00:00:00 2001
+From aedf0ee29e759b0e3e4437c401765377daf3ee5d Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 3 Oct 2026 19:59:55 +0300
+Date: Sat, 17 Oct 2026 11:19:37 +0300
 Subject: [PATCH 3/5] soc: qcom: pmic_glink: defer rpmsg probe until the
  pmic_glink device exists
 

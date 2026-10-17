@@ -1,6 +1,6 @@
-From fa232cd8775e2c30fa491e9497c149a5cc294e33 Mon Sep 17 00:00:00 2001
+From 3ab7c9eb5108f1c33bbc46fe24f9e21b16d87e7c Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Fri, 16 Oct 2026 20:17:12 +0300
+Date: Sat, 17 Oct 2026 11:19:37 +0300
 Subject: [PATCH 4/5] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP/CDSP for
  Linux at EL2
 
