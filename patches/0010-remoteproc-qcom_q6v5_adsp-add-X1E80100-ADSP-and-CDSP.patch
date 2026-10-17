@@ -1,6 +1,6 @@
-From 2b2e98b6b0ced4515bbc1a0a715eeae7f2c7ada7 Mon Sep 17 00:00:00 2001
+From 900d96b8b1bfa49b11c4cac20de5eaf0acff99f6 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 21:23:40 +0300
+Date: Sat, 17 Oct 2026 22:08:43 +0300
 Subject: [PATCH 10/12] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP and CDSP
  for Linux at EL2
 
@@ -12,10 +12,11 @@ into the carveouts and releases the core through the QDSP6SS boot FSM.
 What X1E80100 needs on top of that, all of which QHEE does otherwise:
 
 - A second image. Each DSP also runs a DTB image from its own carveout,
-  and the ADSP finds it through a descriptor at qdsp6ss+0x60..0x74 that
-  a reset clears. The descriptor also carries the chip and platform
-  identity the ADSP uses to pick its configuration from that image; take
-  it from socinfo and pack it the way QHEE does.
+  and finds it through a descriptor at qdsp6ss+0x60..0x74 that a reset
+  clears. The descriptor also carries the chip and platform identity the
+  DSP uses to pick its configuration from that image; take it from
+  socinfo and pack it the way QHEE does. Without the descriptor a DSP
+  still boots, but without that configuration.
 - The Q6 core PLL (Lucid OLE) and core RCG, and on the ADSP the LPASS
   TCM branch clocks. The PLL sequence differs from
   clk_lucid_ole_pll_configure() in its calibration handshake and output
@@ -34,8 +35,8 @@ firmware. Where only the block is known, the offset is used as the name.
 Assisted-by: Claude Opus 5.5
 ---
  drivers/remoteproc/Kconfig          |    1 +
- drivers/remoteproc/qcom_q6v5_adsp.c | 1215 ++++++++++++++++++++++++++-
- 2 files changed, 1213 insertions(+), 3 deletions(-)
+ drivers/remoteproc/qcom_q6v5_adsp.c | 1233 ++++++++++++++++++++++++++-
+ 2 files changed, 1231 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index 5b56b2dcc725..ace20c1dc73d 100644
@@ -50,7 +51,7 @@ index 5b56b2dcc725..ace20c1dc73d 100644
  	  Say y here to support the Peripheral Image Loader
  	  for the non-TrustZone part of Qualcomm Technology Inc. ADSP and CDSP
 diff --git a/drivers/remoteproc/qcom_q6v5_adsp.c b/drivers/remoteproc/qcom_q6v5_adsp.c
-index 2e5fb5954fa9..7d46236914fd 100644
+index 2e5fb5954fa9..4845b3b54641 100644
 --- a/drivers/remoteproc/qcom_q6v5_adsp.c
 +++ b/drivers/remoteproc/qcom_q6v5_adsp.c
 @@ -4,6 +4,11 @@
@@ -126,7 +127,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  };
  
  static int qcom_rproc_pds_attach(struct qcom_adsp *adsp, const char **pd_names,
-@@ -532,6 +570,1107 @@ static const struct rproc_ops adsp_ops = {
+@@ -532,6 +570,1125 @@ static const struct rproc_ops adsp_ops = {
  	.panic = adsp_panic,
  };
  
@@ -635,7 +636,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
 +	return (u64)ehdr->e_entry + phys - reloc;
 +}
 +
-+/* Size of the loaded DTB image, as the ADSP reads it from the descriptor */
++/* Size of the loaded DTB image, as the DSP reads it from the descriptor */
 +static int x1e_dtb_size(struct qcom_adsp *pas, u32 *size)
 +{
 +	const struct firmware *fw = pas->dtb_firmware;
@@ -671,9 +672,9 @@ index 2e5fb5954fa9..7d46236914fd 100644
 +}
 +
 +/*
-+ * The ADSP picks its configuration out of the DTB image by chip and platform.
++ * Each DSP picks its configuration out of its DTB image by chip and platform.
 + * It reads them from the descriptor, packed the way the hypervisor packs the
-+ * socinfo fields when it starts the ADSP itself.
++ * socinfo fields when it starts the DSP itself.
 + */
 +static int x1e_dtb_identity(struct qcom_adsp *pas)
 +{
@@ -696,15 +697,34 @@ index 2e5fb5954fa9..7d46236914fd 100644
 +	return 0;
 +}
 +
-+static int x1e_adsp_bringup(struct qcom_adsp *pas)
++/*
++ * The DTB image descriptor; a reset clears it. Without it the DSP still boots,
++ * but runs without the configuration from its DTB image.
++ */
++static int x1e_write_dtb_desc(struct qcom_adsp *pas)
 +{
 +	u64 dtb_entry;
 +	u32 dtb_size;
-+	int ret, i;
++	int ret;
 +
 +	ret = x1e_dtb_size(pas, &dtb_size);
 +	if (ret)
 +		return ret;
++
++	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
++
++	return 0;
++}
++
++static int x1e_adsp_bringup(struct qcom_adsp *pas)
++{
++	int ret, i;
 +
 +	/* TCM clocks */
 +	x1e_wr(pas, X1E_LPASS_MCC, LPASS_MCC_RSC_WAIT_EVENT_OVRD_MASK, 0x8);
@@ -722,14 +742,9 @@ index 2e5fb5954fa9..7d46236914fd 100644
 +	if (ret)
 +		return ret;
 +
-+	/* The DTB image descriptor; a reset clears it */
-+	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
++	ret = x1e_write_dtb_desc(pas);
++	if (ret)
++		return ret;
 +
 +	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
 +	x1e_wr(pas, X1E_QDSP6SS, RET_CFG_REG, 0);
@@ -746,6 +761,10 @@ index 2e5fb5954fa9..7d46236914fd 100644
 +
 +	if ((hw >> 28) != 0xa || (((hw >> 16) & 0xfff) != 0x9 && ((hw >> 16) & 0xfff) != 0x16))
 +		return -ENODEV;
++
++	ret = x1e_write_dtb_desc(pas);
++	if (ret)
++		return ret;
 +
 +	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
 +	x1e_wr(pas, X1E_QDSP6SS, RET_CFG_REG, 0);
@@ -1234,7 +1253,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)
  {
  	int num_clks = 0;
-@@ -667,15 +1806,23 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -667,15 +1824,23 @@ static int adsp_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -1261,7 +1280,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
  
  	adsp = rproc->priv;
-@@ -683,6 +1830,7 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -683,6 +1848,7 @@ static int adsp_probe(struct platform_device *pdev)
  	adsp->rproc = rproc;
  	adsp->info_name = desc->sysmon_name;
  	adsp->has_iommu = desc->has_iommu;
@@ -1269,7 +1288,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  
  	platform_set_drvdata(pdev, adsp);
  
-@@ -712,6 +1860,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -712,6 +1878,12 @@ static int adsp_probe(struct platform_device *pdev)
  	if (ret)
  		goto disable_pm;
  
@@ -1282,7 +1301,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  	ret = qcom_q6v5_init(&adsp->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_adsp_pil_handover);
  	if (ret)
-@@ -728,6 +1882,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -728,6 +1900,12 @@ static int adsp_probe(struct platform_device *pdev)
  		goto deinit_remove_glink_pdm_ssr;
  	}
  
@@ -1295,7 +1314,7 @@ index 2e5fb5954fa9..7d46236914fd 100644
  	ret = rproc_add(rproc);
  	if (ret)
  		goto remove_sysmon;
-@@ -827,11 +1987,60 @@ static const struct adsp_pil_data wpss_resource_init = {
+@@ -827,11 +2005,60 @@ static const struct adsp_pil_data wpss_resource_init = {
  	.num_pds = 2,
  };
  

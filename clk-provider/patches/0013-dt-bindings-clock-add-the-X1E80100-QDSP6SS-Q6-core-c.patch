@@ -1,4 +1,4 @@
-From 094c81433f750f68164e2c04bed361bfd1cbd227 Mon Sep 17 00:00:00 2001
+From 6a0e5fde8041e5d3e741da701456861a800f4cf0 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:59:42 +0300
 Subject: [PATCH 13/17] dt-bindings: clock: add the X1E80100 QDSP6SS Q6 core
@@ -10,18 +10,18 @@ programs them.
 
 Assisted-by: Claude Opus 5.5
 ---
- .../bindings/clock/qcom,x1e80100-q6sscc.yaml  | 52 +++++++++++++++++++
+ .../bindings/clock/qcom,x1e80100-q6sscc.yaml  | 50 +++++++++++++++++++
  .../dt-bindings/clock/qcom,x1e80100-q6sscc.h  |  9 ++++
- 2 files changed, 61 insertions(+)
+ 2 files changed, 59 insertions(+)
  create mode 100644 Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
  create mode 100644 include/dt-bindings/clock/qcom,x1e80100-q6sscc.h
 
 diff --git a/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml b/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
 new file mode 100644
-index 000000000000..b744fb514d98
+index 000000000000..48ade573af79
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/clock/qcom,x1e80100-q6sscc.yaml
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,50 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---
@@ -51,7 +51,7 @@ index 000000000000..b744fb514d98
 +
 +  clocks:
 +    items:
-+      - description: XO reference clock
++      - description: XO reference clock (19.2 MHz)
 +
 +  '#clock-cells':
 +    const: 1
@@ -66,12 +66,10 @@ index 000000000000..b744fb514d98
 +
 +examples:
 +  - |
-+    #include <dt-bindings/clock/qcom,rpmh.h>
-+
 +    clock-controller@32340000 {
 +        compatible = "qcom,x1e80100-cdsp-q6sscc";
 +        reg = <0x32340000 0x10000>;
-+        clocks = <&rpmhcc RPMH_CXO_CLK>;
++        clocks = <&bi_tcxo_ao_div2>;
 +        #clock-cells = <1>;
 +    };
 diff --git a/include/dt-bindings/clock/qcom,x1e80100-q6sscc.h b/include/dt-bindings/clock/qcom,x1e80100-q6sscc.h

@@ -17,8 +17,8 @@ running.
 What X1E80100 needs beyond the SC7280 path, all of which QHEE does
 otherwise:
 
-- a DTB image per DSP, and for the ADSP a descriptor at qdsp6ss+0x60
-  that a reset clears;
+- a DTB image per DSP, and a descriptor for it at qdsp6ss+0x60 that a
+  reset clears;
 - the Q6 core PLL and core RCG, and the LPASS TCM branch clocks. The
   Q6 ones get a small clock provider (patches 13-17);
 - stop sequences ending in the PDC sync reset and AOSS restart pulse of

@@ -1,6 +1,6 @@
-From 8ea9011a57f393caf749f270a38c27e8adb8322a Mon Sep 17 00:00:00 2001
+From d4304e41d4978bc36f9937d6bf959f621cfb9441 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 21:23:41 +0300
+Date: Sat, 17 Oct 2026 22:08:43 +0300
 Subject: [PATCH 12/12] arm64: dts: qcom: x1-el2: start ADSP and CDSP from
  Linux
 

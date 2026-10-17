@@ -28,8 +28,9 @@ carveout and releases the core through the QDSP6SS boot FSM (`RST_EVB`, `BOOT_CO
 `BOOT_CMD`). There is no PAS `auth_and_reset` and no signature check. X1E needs a few extra
 things that the hypervisor (QHEE) would otherwise do:
 
-- **Second image.** Each DSP also loads its DTB image into its own carveout. For the ADSP,
-  the DTB descriptor at qdsp6ss+0x60..0x74 is rewritten, because a reset clears it.
+- **Second image.** Each DSP also loads its DTB image into its own carveout, and the DTB
+  descriptor at qdsp6ss+0x60..0x74 is rewritten for both, because a reset clears it. Without
+  it a DSP still boots, but without its DTB configuration (the CDSP did that until now).
 - **EVB.** The boot address is the ELF entry point, and the other register bits are kept.
 - **Clock/PLL bring-up and stop sequences.** These were recovered from QHEE (.367). The
   driver writes them through named registers; the stop ends in the PDC sync reset and AOSS
@@ -118,7 +119,7 @@ Firmware is loaded from `/lib/firmware` via the DT `firmware-name` entries
 
 ### Board-specific values
 
-None in the ADSP bring-up any more. The chip and platform identity in the ADSP DTB descriptor
+None in the DSP bring-up any more. The chip and platform identity in the DTB descriptors
 comes from SMEM socinfo (item 137), packed the way QHEE packs it; on this Vivobook that gives
 the old hardcoded values `0x0088022b`, `0x0201` and `0x28000200`. The CDSP bring-up still
 checks the SoC id register for an X1E part.
@@ -140,7 +141,8 @@ checks the SoC id register for an X1E part.
   `qcom_scm`.
 - **Ignored timeouts.** Some timeouts are ignored on purpose, because QHEE ignores them too.
 - **Missing QHEE step.** The CDSP private channel clear that QHEE does is not reproduced.
-- **One device.** Tested on one Vivobook only; the ADSP descriptor values are this laptop's.
+- **Few devices.** Tested here on one Vivobook; an earlier version was also reported working
+  on a Surface Pro 11.
 
 ## Restart (`optional-restart/`)
 

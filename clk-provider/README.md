@@ -45,9 +45,9 @@ So `q6sscc` never reads the hardware on its own:
 The remoteproc driver calls `clk_prepare_enable(core)` at the point where it used to program
 the PLL: before the DTB descriptor on the ADSP, after the boot FSM on the CDSP.
 
-Known gap: the reported rate is XO × 50 = 1920 MHz with the 38.4 MHz `RPMH_CXO_CLK` as parent.
-QHEE treats the PLL reference as 19.2 MHz, which would make it 960 MHz. Nothing uses the rate,
-but the parent is probably not quite right.
+The parent is `bi_tcxo_ao_div2`: the PLL configuration assumes a 19.2 MHz reference
+(L = 0x32 for 960 MHz, which is what the clock framework now reports), and the active-only
+vote does not keep XO on while the CPUs sleep.
 
 ## Tested
 

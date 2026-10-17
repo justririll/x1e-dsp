@@ -1075,7 +1075,7 @@ static u64 x1e_entry(const struct firmware *fw, phys_addr_t phys, phys_addr_t re
 	return (u64)ehdr->e_entry + phys - reloc;
 }
 
-/* Size of the loaded DTB image, as the ADSP reads it from the descriptor */
+/* Size of the loaded DTB image, as the DSP reads it from the descriptor */
 static int x1e_dtb_size(struct qcom_adsp *pas, u32 *size)
 {
 	const struct firmware *fw = pas->dtb_firmware;
@@ -1111,9 +1111,9 @@ static u32 x1e_dtb_version(u32 ver)
 }
 
 /*
- * The ADSP picks its configuration out of the DTB image by chip and platform.
+ * Each DSP picks its configuration out of its DTB image by chip and platform.
  * It reads them from the descriptor, packed the way the hypervisor packs the
- * socinfo fields when it starts the ADSP itself.
+ * socinfo fields when it starts the DSP itself.
  */
 static int x1e_dtb_identity(struct qcom_adsp *pas)
 {
@@ -1136,15 +1136,34 @@ static int x1e_dtb_identity(struct qcom_adsp *pas)
 	return 0;
 }
 
-static int x1e_adsp_bringup(struct qcom_adsp *pas)
+/*
+ * The DTB image descriptor; a reset clears it. Without it the DSP still boots,
+ * but runs without the configuration from its DTB image.
+ */
+static int x1e_write_dtb_desc(struct qcom_adsp *pas)
 {
 	u64 dtb_entry;
 	u32 dtb_size;
-	int ret, i;
+	int ret;
 
 	ret = x1e_dtb_size(pas, &dtb_size);
 	if (ret)
 		return ret;
+
+	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
+
+	return 0;
+}
+
+static int x1e_adsp_bringup(struct qcom_adsp *pas)
+{
+	int ret, i;
 
 	/* TCM clocks */
 	x1e_wr(pas, X1E_LPASS_MCC, LPASS_MCC_RSC_WAIT_EVENT_OVRD_MASK, 0x8);
@@ -1162,14 +1181,9 @@ static int x1e_adsp_bringup(struct qcom_adsp *pas)
 	if (ret)
 		return ret;
 
-	/* The DTB image descriptor; a reset clears it */
-	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
+	ret = x1e_write_dtb_desc(pas);
+	if (ret)
+		return ret;
 
 	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
 	x1e_wr(pas, X1E_QDSP6SS, RET_CFG_REG, 0);
@@ -1186,6 +1200,10 @@ static int x1e_cdsp_bringup(struct qcom_adsp *pas)
 
 	if ((hw >> 28) != 0xa || (((hw >> 16) & 0xfff) != 0x9 && ((hw >> 16) & 0xfff) != 0x16))
 		return -ENODEV;
+
+	ret = x1e_write_dtb_desc(pas);
+	if (ret)
+		return ret;
 
 	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
 	x1e_wr(pas, X1E_QDSP6SS, RET_CFG_REG, 0);
