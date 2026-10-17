@@ -1,4 +1,4 @@
-From 92f30182e3fdea895c5c1db72bbbbdc491861851 Mon Sep 17 00:00:00 2001
+From afa631a6b3a1ca82517539bc5990226cbb0de3b6 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 13:16:18 +0300
 Subject: [PATCH 14/17] dt-bindings: remoteproc: qcom,x1e80100-adsp-pil: add

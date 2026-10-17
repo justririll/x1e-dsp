@@ -30,6 +30,7 @@
 #include <linux/soc/qcom/mdt_loader.h>
 #include <linux/soc/qcom/smem.h>
 #include <linux/soc/qcom/smem_state.h>
+#include <linux/soc/qcom/socinfo.h>
 
 #include "qcom_common.h"
 #include "qcom_pil_info.h"
@@ -149,6 +150,9 @@ struct qcom_adsp {
 	phys_addr_t dtb_mem_reloc;
 	void __iomem *dtb_mem_region;
 	size_t dtb_mem_size;
+	u32 dtb_chip_id;
+	u32 dtb_chip_version;
+	u32 dtb_platform_info;
 	unsigned long extra_mapped;
 	DECLARE_BITMAP(qhee_mapped, 128);
 	void __iomem *x1e_base[X1E_NR_BLK_MAX];
@@ -1100,23 +1104,43 @@ static int x1e_dtb_size(struct qcom_adsp *pas, u32 *size)
 	return 0;
 }
 
-/* Read from this Vivobook before reset; another X1E device may need its own values */
-static unsigned int adsp_chip_ids = 0x0088022b;
-module_param(adsp_chip_ids, uint, 0444);
-static unsigned int adsp_chip_version = 0x201;
-module_param(adsp_chip_version, uint, 0444);
-static unsigned int adsp_platform_info = 0x28000200;
-module_param(adsp_platform_info, uint, 0444);
+/* SMEM keeps 16-bit major and minor numbers, the descriptor one byte of each */
+static u32 x1e_dtb_version(u32 ver)
+{
+	return ((ver >> 8) & 0xff00) | (ver & 0xff);
+}
+
+/*
+ * The ADSP picks its configuration out of the DTB image by chip and platform.
+ * It reads them from the descriptor, packed the way the hypervisor packs the
+ * socinfo fields when it starts the ADSP itself.
+ */
+static int x1e_dtb_identity(struct qcom_adsp *pas)
+{
+	const struct socinfo *info;
+	size_t size;
+
+	info = qcom_smem_get(QCOM_SMEM_HOST_ANY, SMEM_HW_SW_BUILD_ID, &size);
+	if (IS_ERR(info))
+		return dev_err_probe(pas->dev, PTR_ERR(info), "unable to read socinfo\n");
+	if (size < offsetofend(struct socinfo, chip_family) ||
+	    le32_to_cpu(info->fmt) < SOCINFO_VERSION(0, 12))
+		return dev_err_probe(pas->dev, -EINVAL, "socinfo has no chip family\n");
+
+	pas->dtb_chip_id = (le32_to_cpu(info->chip_family) & 0xffff) << 16 |
+			   (le32_to_cpu(info->id) & 0xffff);
+	pas->dtb_chip_version = x1e_dtb_version(le32_to_cpu(info->ver));
+	pas->dtb_platform_info = (le32_to_cpu(info->hw_plat) & 0xff) << 24 |
+				 (le32_to_cpu(info->hw_plat_subtype) & 0xff) << 16 |
+				 x1e_dtb_version(le32_to_cpu(info->plat_ver));
+	return 0;
+}
 
 static int x1e_adsp_bringup(struct qcom_adsp *pas)
 {
 	u64 dtb_entry;
 	u32 dtb_size;
 	int ret, i;
-
-	/* The descriptor values above are only known for this SoC revision */
-	if (x1e_rd(pas, X1E_TCSR_SOC, X1E_SOC_HW_VERSION) != 0xa0090201)
-		return -ENODEV;
 
 	ret = x1e_dtb_size(pas, &dtb_size);
 	if (ret)
@@ -1142,9 +1166,9 @@ static int x1e_adsp_bringup(struct qcom_adsp *pas)
 	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
 	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
 	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, adsp_chip_ids);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, adsp_chip_version);
-	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, adsp_platform_info);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
 	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
 
 	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
@@ -1644,7 +1668,7 @@ static int x1e_probe(struct qcom_adsp *pas)
 	if (ret < 0 && ret != -EINVAL)
 		return ret;
 
-	return 0;
+	return x1e_dtb_identity(pas);
 }
 
 static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)

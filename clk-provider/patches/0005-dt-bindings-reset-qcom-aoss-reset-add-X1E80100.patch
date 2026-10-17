@@ -1,6 +1,6 @@
-From 83bfb76033a6a21919a44ff79942fe6c4efdec04 Mon Sep 17 00:00:00 2001
+From f2e01b93c7dd45325be56ec92e3e637b6e8155c3 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 12:43:38 +0300
+Date: Sat, 17 Oct 2026 21:23:39 +0300
 Subject: [PATCH 05/17] dt-bindings: reset: qcom,aoss-reset: add X1E80100
 
 Add X1E80100, whose AOSS_CC_RST_CTL block also restarts the Turing

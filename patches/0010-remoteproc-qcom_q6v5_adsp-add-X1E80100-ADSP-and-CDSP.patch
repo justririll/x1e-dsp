@@ -1,6 +1,6 @@
-From abd4415b3f6576d2d4b3033b50075b68315e0c0a Mon Sep 17 00:00:00 2001
+From 2b2e98b6b0ced4515bbc1a0a715eeae7f2c7ada7 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 12:43:39 +0300
+Date: Sat, 17 Oct 2026 21:23:40 +0300
 Subject: [PATCH 10/12] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP and CDSP
  for Linux at EL2
 
@@ -13,7 +13,9 @@ What X1E80100 needs on top of that, all of which QHEE does otherwise:
 
 - A second image. Each DSP also runs a DTB image from its own carveout,
   and the ADSP finds it through a descriptor at qdsp6ss+0x60..0x74 that
-  a reset clears.
+  a reset clears. The descriptor also carries the chip and platform
+  identity the ADSP uses to pick its configuration from that image; take
+  it from socinfo and pack it the way QHEE does.
 - The Q6 core PLL (Lucid OLE) and core RCG, and on the ADSP the LPASS
   TCM branch clocks. The PLL sequence differs from
   clk_lucid_ole_pll_configure() in its calibration handshake and output
@@ -32,8 +34,8 @@ firmware. Where only the block is known, the offset is used as the name.
 Assisted-by: Claude Opus 5.5
 ---
  drivers/remoteproc/Kconfig          |    1 +
- drivers/remoteproc/qcom_q6v5_adsp.c | 1191 ++++++++++++++++++++++++++-
- 2 files changed, 1189 insertions(+), 3 deletions(-)
+ drivers/remoteproc/qcom_q6v5_adsp.c | 1215 ++++++++++++++++++++++++++-
+ 2 files changed, 1213 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index 5b56b2dcc725..ace20c1dc73d 100644
@@ -48,7 +50,7 @@ index 5b56b2dcc725..ace20c1dc73d 100644
  	  Say y here to support the Peripheral Image Loader
  	  for the non-TrustZone part of Qualcomm Technology Inc. ADSP and CDSP
 diff --git a/drivers/remoteproc/qcom_q6v5_adsp.c b/drivers/remoteproc/qcom_q6v5_adsp.c
-index 2e5fb5954fa9..cccf768c2b8c 100644
+index 2e5fb5954fa9..7d46236914fd 100644
 --- a/drivers/remoteproc/qcom_q6v5_adsp.c
 +++ b/drivers/remoteproc/qcom_q6v5_adsp.c
 @@ -4,6 +4,11 @@
@@ -63,7 +65,15 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  #include <linux/clk.h>
  #include <linux/delay.h>
  #include <linux/firmware.h>
-@@ -59,6 +64,20 @@
+@@ -25,6 +30,7 @@
+ #include <linux/soc/qcom/mdt_loader.h>
+ #include <linux/soc/qcom/smem.h>
+ #include <linux/soc/qcom/smem_state.h>
++#include <linux/soc/qcom/socinfo.h>
+ 
+ #include "qcom_common.h"
+ #include "qcom_pil_info.h"
+@@ -59,6 +65,20 @@
  #define LPASS_BOOT_CMD_START	BIT(0)
  #define LPASS_EFUSE_Q6SS_EVB_SEL 0x0
  
@@ -84,7 +94,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  struct adsp_pil_data {
  	int crash_reason_smem;
  	const char *firmware_name;
-@@ -75,6 +94,8 @@ struct adsp_pil_data {
+@@ -75,6 +95,8 @@ struct adsp_pil_data {
  	const char **pd_names;
  	unsigned int num_pds;
  	const char *load_state;
@@ -93,7 +103,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  };
  
  struct qcom_adsp {
-@@ -118,6 +139,19 @@ struct qcom_adsp {
+@@ -118,6 +140,22 @@ struct qcom_adsp {
  	struct qcom_sysmon *sysmon;
  
  	int (*shutdown)(struct qcom_adsp *adsp);
@@ -107,13 +117,16 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
 +	phys_addr_t dtb_mem_reloc;
 +	void __iomem *dtb_mem_region;
 +	size_t dtb_mem_size;
++	u32 dtb_chip_id;
++	u32 dtb_chip_version;
++	u32 dtb_platform_info;
 +	unsigned long extra_mapped;
 +	DECLARE_BITMAP(qhee_mapped, 128);
 +	void __iomem *x1e_base[X1E_NR_BLK_MAX];
  };
  
  static int qcom_rproc_pds_attach(struct qcom_adsp *adsp, const char **pd_names,
-@@ -532,6 +566,1087 @@ static const struct rproc_ops adsp_ops = {
+@@ -532,6 +570,1107 @@ static const struct rproc_ops adsp_ops = {
  	.panic = adsp_panic,
  };
  
@@ -651,23 +664,43 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
 +	return 0;
 +}
 +
-+/* Read from this Vivobook before reset; another X1E device may need its own values */
-+static unsigned int adsp_chip_ids = 0x0088022b;
-+module_param(adsp_chip_ids, uint, 0444);
-+static unsigned int adsp_chip_version = 0x201;
-+module_param(adsp_chip_version, uint, 0444);
-+static unsigned int adsp_platform_info = 0x28000200;
-+module_param(adsp_platform_info, uint, 0444);
++/* SMEM keeps 16-bit major and minor numbers, the descriptor one byte of each */
++static u32 x1e_dtb_version(u32 ver)
++{
++	return ((ver >> 8) & 0xff00) | (ver & 0xff);
++}
++
++/*
++ * The ADSP picks its configuration out of the DTB image by chip and platform.
++ * It reads them from the descriptor, packed the way the hypervisor packs the
++ * socinfo fields when it starts the ADSP itself.
++ */
++static int x1e_dtb_identity(struct qcom_adsp *pas)
++{
++	const struct socinfo *info;
++	size_t size;
++
++	info = qcom_smem_get(QCOM_SMEM_HOST_ANY, SMEM_HW_SW_BUILD_ID, &size);
++	if (IS_ERR(info))
++		return dev_err_probe(pas->dev, PTR_ERR(info), "unable to read socinfo\n");
++	if (size < offsetofend(struct socinfo, chip_family) ||
++	    le32_to_cpu(info->fmt) < SOCINFO_VERSION(0, 12))
++		return dev_err_probe(pas->dev, -EINVAL, "socinfo has no chip family\n");
++
++	pas->dtb_chip_id = (le32_to_cpu(info->chip_family) & 0xffff) << 16 |
++			   (le32_to_cpu(info->id) & 0xffff);
++	pas->dtb_chip_version = x1e_dtb_version(le32_to_cpu(info->ver));
++	pas->dtb_platform_info = (le32_to_cpu(info->hw_plat) & 0xff) << 24 |
++				 (le32_to_cpu(info->hw_plat_subtype) & 0xff) << 16 |
++				 x1e_dtb_version(le32_to_cpu(info->plat_ver));
++	return 0;
++}
 +
 +static int x1e_adsp_bringup(struct qcom_adsp *pas)
 +{
 +	u64 dtb_entry;
 +	u32 dtb_size;
 +	int ret, i;
-+
-+	/* The descriptor values above are only known for this SoC revision */
-+	if (x1e_rd(pas, X1E_TCSR_SOC, X1E_SOC_HW_VERSION) != 0xa0090201)
-+		return -ENODEV;
 +
 +	ret = x1e_dtb_size(pas, &dtb_size);
 +	if (ret)
@@ -693,9 +726,9 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
 +	dtb_entry = x1e_entry(pas->dtb_firmware, pas->dtb_mem_phys, pas->dtb_mem_reloc);
 +	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_LO, lower_32_bits(dtb_entry));
 +	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_ENTRY_HI, upper_32_bits(dtb_entry));
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, adsp_chip_ids);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, adsp_chip_version);
-+	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, adsp_platform_info);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_ID, pas->dtb_chip_id);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_CHIP_VERSION, pas->dtb_chip_version);
++	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_PLATFORM_INFO, pas->dtb_platform_info);
 +	x1e_wr(pas, X1E_QDSP6SS, QDSP6SS_DTB_SIZE, dtb_size);
 +
 +	x1e_set_evb(pas, x1e_entry(pas->firmware, pas->mem_phys, pas->mem_reloc));
@@ -1195,13 +1228,13 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
 +	if (ret < 0 && ret != -EINVAL)
 +		return ret;
 +
-+	return 0;
++	return x1e_dtb_identity(pas);
 +}
 +
  static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)
  {
  	int num_clks = 0;
-@@ -667,15 +1782,23 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -667,15 +1806,23 @@ static int adsp_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -1228,7 +1261,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
  
  	adsp = rproc->priv;
-@@ -683,6 +1806,7 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -683,6 +1830,7 @@ static int adsp_probe(struct platform_device *pdev)
  	adsp->rproc = rproc;
  	adsp->info_name = desc->sysmon_name;
  	adsp->has_iommu = desc->has_iommu;
@@ -1236,7 +1269,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  
  	platform_set_drvdata(pdev, adsp);
  
-@@ -712,6 +1836,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -712,6 +1860,12 @@ static int adsp_probe(struct platform_device *pdev)
  	if (ret)
  		goto disable_pm;
  
@@ -1249,7 +1282,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  	ret = qcom_q6v5_init(&adsp->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_adsp_pil_handover);
  	if (ret)
-@@ -728,6 +1858,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -728,6 +1882,12 @@ static int adsp_probe(struct platform_device *pdev)
  		goto deinit_remove_glink_pdm_ssr;
  	}
  
@@ -1262,7 +1295,7 @@ index 2e5fb5954fa9..cccf768c2b8c 100644
  	ret = rproc_add(rproc);
  	if (ret)
  		goto remove_sysmon;
-@@ -827,11 +1963,60 @@ static const struct adsp_pil_data wpss_resource_init = {
+@@ -827,11 +1987,60 @@ static const struct adsp_pil_data wpss_resource_init = {
  	.num_pds = 2,
  };
  

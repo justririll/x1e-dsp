@@ -45,10 +45,7 @@ Questions:
 2. The ADSP stop powers down the LPASS core and audio clock domains,
    including the audio PLLs that the LPASS macro drivers use. Should that
    part move to the LPASS clock/power drivers?
-3. The ADSP DTB descriptor carries chip id, version and platform info.
-   They are module parameters with the values read on one laptop; is
-   there a preferred source (socinfo) for them?
-4. TCSR halt block compatible: "qcom,x1e80100-tcsr" is taken by the TCSR
+3. TCSR halt block compatible: "qcom,x1e80100-tcsr" is taken by the TCSR
    clock controller, so this adds "qcom,x1e80100-tcsr-halt".
 
 Tested on an ASUS Vivobook S15 (S5507QA) with linux-msm/laptops-kernel

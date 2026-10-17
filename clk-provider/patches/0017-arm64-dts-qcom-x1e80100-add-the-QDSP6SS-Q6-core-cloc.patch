@@ -1,4 +1,4 @@
-From 0175f490b0c3f49fd62fb5e640b4de311a97c7aa Mon Sep 17 00:00:00 2001
+From 9434539424172c0f95aad5ccb68e3842cdb07123 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:59:43 +0300
 Subject: [PATCH 17/17] arm64: dts: qcom: x1e80100: add the QDSP6SS Q6 core

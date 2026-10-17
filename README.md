@@ -118,11 +118,10 @@ Firmware is loaded from `/lib/firmware` via the DT `firmware-name` entries
 
 ### Board-specific values
 
-- **ADSP DTB descriptor values** are module parameters with this laptop's defaults
-  (`adsp_chip_ids=0x0088022b`, `adsp_chip_version=0x201`, `adsp_platform_info=0x28000200`).
-  They were read on this Vivobook before reset. On another X1E device, read your own first.
-- **SoC id check.** The ADSP bring-up refuses to run unless the SoC id register reads
-  exactly `0xa0090201`.
+None in the ADSP bring-up any more. The chip and platform identity in the ADSP DTB descriptor
+comes from SMEM socinfo (item 137), packed the way QHEE packs it; on this Vivobook that gives
+the old hardcoded values `0x0088022b`, `0x0201` and `0x28000200`. The CDSP bring-up still
+checks the SoC id register for an X1E part.
 
 ## Not done / honest notes
 
