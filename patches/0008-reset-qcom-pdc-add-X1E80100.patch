@@ -1,6 +1,6 @@
-From 484a478d20c5b64eb6564d7a29f73cd7d8632ec5 Mon Sep 17 00:00:00 2001
+From 846b6cf4a395ca07b8b1eef67efb65f6d99d6c99 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sun, 18 Oct 2026 11:53:36 +0300
+Date: Sun, 18 Oct 2026 12:29:53 +0300
 Subject: [PATCH 08/12] reset: qcom: pdc: add X1E80100
 
 X1E80100 keeps the PDC sync reset at the same offset as SC7280, but the

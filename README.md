@@ -93,8 +93,10 @@ inside the CDSP firmware, not from guesses.
 
 The table is the 103 apertures of the ASUS QHEE (.367) plus four read-only SPMI windows
 (SPMI0/SPMI1 `CFG_TOP` and `PIC_OWNER`) that newer QHEE builds add, e.g. the one in Surface
-UEFI 175.222.235; the other 103 entries are identical there. A newer CDSP firmware that reads
-those registers crashes in its sleep statistics code without them.
+UEFI 175.222.235; the other 103 entries are identical there. They are granted so the table
+matches what that hypervisor gives the CDSP. Whether they matter for a CDSP crash reported on
+another device (in the firmware's sleep statistics code) is not confirmed: it did not
+reproduce here with that device's CDSP firmware, with or without them.
 
 ### What the registers are
 

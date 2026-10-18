@@ -1,6 +1,6 @@
-From 32f2766ae7f060320bee790af7d2a50657df74ac Mon Sep 17 00:00:00 2001
+From 501ab635fa6f5687ae95d16698ec222f90263025 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sun, 18 Oct 2026 11:53:36 +0300
+Date: Sun, 18 Oct 2026 12:29:52 +0300
 Subject: [PATCH 07/17] dt-bindings: remoteproc: add X1E80100 ADSP and CDSP
  without TZ PAS
 

@@ -1,4 +1,4 @@
-From a29641422b6d0b58b22d0c464c8744eed6599254 Mon Sep 17 00:00:00 2001
+From 333823f7ce4f8e6cadfda71f27f784a88e1a2fcb Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:11:02 +0300
 Subject: [PATCH 02/17] arm64: dts: qcom: x1-el2: 40-bit DMA ranges, Iris

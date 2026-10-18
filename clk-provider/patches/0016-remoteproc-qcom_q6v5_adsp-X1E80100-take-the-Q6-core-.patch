@@ -1,4 +1,4 @@
-From d3c26ced0cd8d374993cf296196aa205194213b6 Mon Sep 17 00:00:00 2001
+From ded104d800fd4fa766787c36cfa92b177271629c Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 13:16:19 +0300
 Subject: [PATCH 16/17] remoteproc: qcom_q6v5_adsp: X1E80100: take the Q6 core

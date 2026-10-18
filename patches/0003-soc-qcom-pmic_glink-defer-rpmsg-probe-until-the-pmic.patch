@@ -1,4 +1,4 @@
-From 2a8c99a4c369048f7e3c390d01bc67dc724f680c Mon Sep 17 00:00:00 2001
+From 04f95042364af046522b9e96f4ed7f4fc60d47cf Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:11:02 +0300
 Subject: [PATCH 03/12] soc: qcom: pmic_glink: defer rpmsg probe until the
