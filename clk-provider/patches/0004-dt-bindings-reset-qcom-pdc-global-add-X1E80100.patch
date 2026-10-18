@@ -1,6 +1,6 @@
-From 5f42e2f136cf03ae5caae180c0f72016b5d12ba2 Mon Sep 17 00:00:00 2001
+From caaadd4266535ec1f3528628f3765feb3ffbffdd Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 22:08:41 +0300
+Date: Sun, 18 Oct 2026 11:35:28 +0300
 Subject: [PATCH 04/17] dt-bindings: reset: qcom,pdc-global: add X1E80100
 
 X1E80100 has the PDC global sync reset of SC7280 at the same offset, but

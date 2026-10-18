@@ -1,6 +1,6 @@
-From 900d96b8b1bfa49b11c4cac20de5eaf0acff99f6 Mon Sep 17 00:00:00 2001
+From 5e27ca5a37b643dd610490ab98d1519b10c64c86 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sat, 17 Oct 2026 22:08:43 +0300
+Date: Sun, 18 Oct 2026 11:35:29 +0300
 Subject: [PATCH 10/17] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP and CDSP
  for Linux at EL2
 
@@ -35,8 +35,8 @@ firmware. Where only the block is known, the offset is used as the name.
 Assisted-by: Claude Opus 5.5
 ---
  drivers/remoteproc/Kconfig          |    1 +
- drivers/remoteproc/qcom_q6v5_adsp.c | 1233 ++++++++++++++++++++++++++-
- 2 files changed, 1231 insertions(+), 3 deletions(-)
+ drivers/remoteproc/qcom_q6v5_adsp.c | 1239 ++++++++++++++++++++++++++-
+ 2 files changed, 1237 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index 5b56b2dcc725..ace20c1dc73d 100644
@@ -51,7 +51,7 @@ index 5b56b2dcc725..ace20c1dc73d 100644
  	  Say y here to support the Peripheral Image Loader
  	  for the non-TrustZone part of Qualcomm Technology Inc. ADSP and CDSP
 diff --git a/drivers/remoteproc/qcom_q6v5_adsp.c b/drivers/remoteproc/qcom_q6v5_adsp.c
-index 2e5fb5954fa9..4845b3b54641 100644
+index 2e5fb5954fa9..32d262ad7725 100644
 --- a/drivers/remoteproc/qcom_q6v5_adsp.c
 +++ b/drivers/remoteproc/qcom_q6v5_adsp.c
 @@ -4,6 +4,11 @@
@@ -127,7 +127,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  };
  
  static int qcom_rproc_pds_attach(struct qcom_adsp *adsp, const char **pd_names,
-@@ -532,6 +570,1125 @@ static const struct rproc_ops adsp_ops = {
+@@ -532,6 +570,1131 @@ static const struct rproc_ops adsp_ops = {
  	.panic = adsp_panic,
  };
  
@@ -153,8 +153,8 @@ index 2e5fb5954fa9..4845b3b54641 100644
 +
 +/* Identity-map shared regions a hypervisor would normally grant the DSP */
 +static const char * const pas_extra_regions[] = {
-+	"/reserved-memory/smem@ffe00000",
-+	"/reserved-memory/aop-cmd-db@81c60000",
++	"qcom,smem",
++	"qcom,cmd-db",
 +};
 +
 +static int x1e_extra_resource(int i, struct resource *res)
@@ -162,7 +162,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
 +	struct device_node *np;
 +	int ret;
 +
-+	np = of_find_node_by_path(pas_extra_regions[i]);
++	np = of_find_compatible_node(NULL, NULL, pas_extra_regions[i]);
 +	if (!np)
 +		return -ENOENT;
 +	ret = of_address_to_resource(np, 0, res);
@@ -180,13 +180,19 @@ index 2e5fb5954fa9..4845b3b54641 100644
 +	for (i = 0; i < ARRAY_SIZE(pas_extra_regions); i++) {
 +		if (map == !!(pas->extra_mapped & BIT(i)))
 +			continue;
-+		if (x1e_extra_resource(i, &res))
++		if (x1e_extra_resource(i, &res)) {
++			if (map)
++				dev_warn(&rproc->dev, "no %s region to map for the DSP\n",
++					 pas_extra_regions[i]);
 +			continue;
++		}
 +		if (map) {
 +			ret = iommu_map(rproc->domain, res.start, res.start, resource_size(&res),
 +					IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
-+			dev_dbg(&rproc->dev, "extra map %pR: %d\n", &res, ret);
-+			if (!ret)
++			if (ret)
++				dev_warn(&rproc->dev, "failed to map %s %pR: %d\n",
++					 pas_extra_regions[i], &res, ret);
++			else
 +				pas->extra_mapped |= BIT(i);
 +		} else {
 +			iommu_unmap(rproc->domain, res.start, resource_size(&res));
@@ -1253,7 +1259,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)
  {
  	int num_clks = 0;
-@@ -667,15 +1824,23 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -667,15 +1830,23 @@ static int adsp_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -1280,7 +1286,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
  
  	adsp = rproc->priv;
-@@ -683,6 +1848,7 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -683,6 +1854,7 @@ static int adsp_probe(struct platform_device *pdev)
  	adsp->rproc = rproc;
  	adsp->info_name = desc->sysmon_name;
  	adsp->has_iommu = desc->has_iommu;
@@ -1288,7 +1294,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  
  	platform_set_drvdata(pdev, adsp);
  
-@@ -712,6 +1878,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -712,6 +1884,12 @@ static int adsp_probe(struct platform_device *pdev)
  	if (ret)
  		goto disable_pm;
  
@@ -1301,7 +1307,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  	ret = qcom_q6v5_init(&adsp->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_adsp_pil_handover);
  	if (ret)
-@@ -728,6 +1900,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -728,6 +1906,12 @@ static int adsp_probe(struct platform_device *pdev)
  		goto deinit_remove_glink_pdm_ssr;
  	}
  
@@ -1314,7 +1320,7 @@ index 2e5fb5954fa9..4845b3b54641 100644
  	ret = rproc_add(rproc);
  	if (ret)
  		goto remove_sysmon;
-@@ -827,11 +2005,60 @@ static const struct adsp_pil_data wpss_resource_init = {
+@@ -827,11 +2011,60 @@ static const struct adsp_pil_data wpss_resource_init = {
  	.num_pds = 2,
  };
  

@@ -1,4 +1,4 @@
-From 6a0e5fde8041e5d3e741da701456861a800f4cf0 Mon Sep 17 00:00:00 2001
+From a662da6493042103dadc190c1e9e9919f98324be Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:59:42 +0300
 Subject: [PATCH 13/17] dt-bindings: clock: add the X1E80100 QDSP6SS Q6 core

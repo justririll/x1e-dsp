@@ -592,8 +592,8 @@ static void x1e_unmap_carveout(struct rproc *rproc, phys_addr_t mem_phys, size_t
 
 /* Identity-map shared regions a hypervisor would normally grant the DSP */
 static const char * const pas_extra_regions[] = {
-	"/reserved-memory/smem@ffe00000",
-	"/reserved-memory/aop-cmd-db@81c60000",
+	"qcom,smem",
+	"qcom,cmd-db",
 };
 
 static int x1e_extra_resource(int i, struct resource *res)
@@ -601,7 +601,7 @@ static int x1e_extra_resource(int i, struct resource *res)
 	struct device_node *np;
 	int ret;
 
-	np = of_find_node_by_path(pas_extra_regions[i]);
+	np = of_find_compatible_node(NULL, NULL, pas_extra_regions[i]);
 	if (!np)
 		return -ENOENT;
 	ret = of_address_to_resource(np, 0, res);
@@ -619,13 +619,19 @@ static void x1e_map_extra(struct qcom_adsp *pas, struct rproc *rproc, bool map)
 	for (i = 0; i < ARRAY_SIZE(pas_extra_regions); i++) {
 		if (map == !!(pas->extra_mapped & BIT(i)))
 			continue;
-		if (x1e_extra_resource(i, &res))
+		if (x1e_extra_resource(i, &res)) {
+			if (map)
+				dev_warn(&rproc->dev, "no %s region to map for the DSP\n",
+					 pas_extra_regions[i]);
 			continue;
+		}
 		if (map) {
 			ret = iommu_map(rproc->domain, res.start, res.start, resource_size(&res),
 					IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
-			dev_dbg(&rproc->dev, "extra map %pR: %d\n", &res, ret);
-			if (!ret)
+			if (ret)
+				dev_warn(&rproc->dev, "failed to map %s %pR: %d\n",
+					 pas_extra_regions[i], &res, ret);
+			else
 				pas->extra_mapped |= BIT(i);
 		} else {
 			iommu_unmap(rproc->domain, res.start, resource_size(&res));
