@@ -75,7 +75,7 @@ cold start plus a stop/start of both DSPs, so they don't just rely on clocks UEF
 
 | DSP | Needed | Dropped (not needed) |
 |---|---|---|
-| CDSP | the 103 IOMMU apertures QHEE grants, SMEM + cmd-db in its IOMMU domain, PLL | branch-clock setup, calibration, QHEE private channel page |
+| CDSP | the 107 IOMMU apertures QHEE grants, SMEM + cmd-db in its IOMMU domain, PLL | branch-clock setup, calibration, QHEE private channel page |
 | ADSP | 10 registers at 0x0726a000 + 0x07250018/0x0726a300, PLL, DTB descriptor | GCC/LPASS branch clocks (0x00147160, 0x06e21008/34, 0x00147010, 0x06848020), optional boot-config block, 0x0725b000 clear |
 
 The stop sequences were not bisected.
@@ -90,6 +90,11 @@ LLCC registers, and from then on even its restarts fault there. So the driver ke
 table. Each entry is named in the source, and [`cdsp-apertures.csv`](cdsp-apertures.csv) lists
 the name and bisection result for every one. The names come from the hardware region directory
 inside the CDSP firmware, not from guesses.
+
+The table is the 103 apertures of the ASUS QHEE (.367) plus four read-only SPMI windows
+(SPMI0/SPMI1 `CFG_TOP` and `PIC_OWNER`) that newer QHEE builds add, e.g. the one in Surface
+UEFI 175.222.235; the other 103 entries are identical there. A newer CDSP firmware that reads
+those registers crashes in its sleep statistics code without them.
 
 ### What the registers are
 

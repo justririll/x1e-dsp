@@ -1,6 +1,6 @@
-From 5555569f372a79dca35aee4aba51c118281eab83 Mon Sep 17 00:00:00 2001
+From 01e620b9c83938f993f5658d54fcccbe004e3e4d Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sun, 18 Oct 2026 11:35:29 +0300
+Date: Sun, 18 Oct 2026 11:53:37 +0300
 Subject: [PATCH 11/12] arm64: dts: qcom: hamoa: add the PDC and AOSS resets
  and the TCSR halt block
 

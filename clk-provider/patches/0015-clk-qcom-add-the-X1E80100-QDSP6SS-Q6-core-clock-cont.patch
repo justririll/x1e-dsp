@@ -1,4 +1,4 @@
-From 28692d73712d8ae4469b28b1fbbd0ff8178b7faa Mon Sep 17 00:00:00 2001
+From 85f44b9939c1445d623dfb7c9335e84cead77888 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
 Date: Sat, 17 Oct 2026 12:59:42 +0300
 Subject: [PATCH 15/17] clk: qcom: add the X1E80100 QDSP6SS Q6 core clock

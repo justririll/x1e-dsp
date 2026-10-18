@@ -24,9 +24,10 @@ otherwise:
 - stop sequences ending in the PDC sync reset and AOSS restart pulse of
   qcom_adsp_shutdown(), so patches 4-6 and 8-9 add X1E80100 to the PDC
   and AOSS reset drivers and describe the TCSR halt block;
-- the CDSP runs in a Linux IOMMU domain, so the 103 apertures QHEE grants
-  it are mapped. Bisected on hardware, 19 are needed to boot, the rest
-  (LLCC, BWMON, ...) once the NPU does any work, so all are kept.
+- the CDSP runs in a Linux IOMMU domain, so the apertures QHEE grants it
+  are mapped: the 103 of the ASUS build plus four read-only SPMI windows
+  that newer QHEE builds add. Bisected on hardware, 19 are needed to boot,
+  the rest (LLCC, BWMON, ...) once the NPU does any work, so all are kept.
 
 The sequences were recovered from the QHEE binary (.367) and the
 register names from the hardware region directory in the DSP firmware.

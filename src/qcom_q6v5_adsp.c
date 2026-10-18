@@ -641,7 +641,9 @@ static void x1e_map_extra(struct qcom_adsp *pas, struct rproc *rproc, bool map)
 }
 
 /*
- * CDSP (VMID 0x1e) static apertures granted by QHEE .367 (table at ELF VA 0xccc08):
+ * CDSP (VMID 0x1e) static apertures granted by QHEE: the 103 of the ASUS .367 build
+ * (table at ELF VA 0xccc08) plus the four read-only SPMI windows that newer builds
+ * (Surface UEFI 175.222.235) add, 107 in all.
  * {pa, size, perm}, perm bit2 = read, bit1 = write. Names come from the hardware
  * region directory in the CDSP firmware. "(boot)" marks the entries the CDSP cannot
  * boot without (bisected on hardware); the others are used at run time, e.g. the
@@ -751,6 +753,10 @@ static const struct { u64 pa; u64 size; u32 perm; } qhee_cdsp_map[] = {
 	{ 0x26221000, 0x1000, 0x4 },	/* 100 LLCC_BROADCAST_ANDTRP */
 	{ 0x320cc000, 0x3000, 0x6 },	/* 101 NSP NoC */
 	{ 0x322fa000, 0x1000, 0x6 },	/* 102 TURING_VAPSS_NOC_VAPSS_NOC_VAPSS_NOC */
+	{ 0x0c42c000, 0x5000, 0x4 },	/* 103 SPMI0_SPMI_CFG_TOP */
+	{ 0x0c431000, 0x5000, 0x4 },	/* 104 SPMI1_SPMI_CFG_TOP */
+	{ 0x0c4c0000, 0x10000, 0x4 },	/* 105 SPMI0_SPMI_PIC_OWNER */
+	{ 0x0c4d0000, 0x10000, 0x4 },	/* 106 SPMI1_SPMI_PIC_OWNER */
 };
 
 static_assert(ARRAY_SIZE(qhee_cdsp_map) <= QHEE_CDSP_MAP_MAX);

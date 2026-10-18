@@ -1,6 +1,6 @@
-From 5e27ca5a37b643dd610490ab98d1519b10c64c86 Mon Sep 17 00:00:00 2001
+From 91f4dba8dc27822203e80d16e59b09d0104ce222 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sun, 18 Oct 2026 11:35:29 +0300
+Date: Sun, 18 Oct 2026 11:53:37 +0300
 Subject: [PATCH 10/17] remoteproc: qcom_q6v5_adsp: add X1E80100 ADSP and CDSP
  for Linux at EL2
 
@@ -24,7 +24,7 @@ What X1E80100 needs on top of that, all of which QHEE does otherwise:
 - The stop sequences: halt the NoC port, gate the core clocks, and pulse
   the PDC sync reset and the AOSS restart, as qcom_adsp_shutdown() does.
   The ADSP stop also powers down the LPASS core and audio clock domains.
-- The CDSP runs in a Linux IOMMU domain, so map the 103 apertures QHEE
+- The CDSP runs in a Linux IOMMU domain, so map the 107 apertures QHEE
   grants it, plus SMEM and the command DB. The ADSP streams stay in bypass.
 - TZ is used once: to stop the ADSP image the UEFI firmware leaves
   running, which also lifts the protection of its carveout.
@@ -35,8 +35,8 @@ firmware. Where only the block is known, the offset is used as the name.
 Assisted-by: Claude Opus 5.5
 ---
  drivers/remoteproc/Kconfig          |    1 +
- drivers/remoteproc/qcom_q6v5_adsp.c | 1239 ++++++++++++++++++++++++++-
- 2 files changed, 1237 insertions(+), 3 deletions(-)
+ drivers/remoteproc/qcom_q6v5_adsp.c | 1245 ++++++++++++++++++++++++++-
+ 2 files changed, 1243 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/remoteproc/Kconfig b/drivers/remoteproc/Kconfig
 index 5b56b2dcc725..ace20c1dc73d 100644
@@ -51,7 +51,7 @@ index 5b56b2dcc725..ace20c1dc73d 100644
  	  Say y here to support the Peripheral Image Loader
  	  for the non-TrustZone part of Qualcomm Technology Inc. ADSP and CDSP
 diff --git a/drivers/remoteproc/qcom_q6v5_adsp.c b/drivers/remoteproc/qcom_q6v5_adsp.c
-index 2e5fb5954fa9..32d262ad7725 100644
+index 2e5fb5954fa9..2b87b08045ed 100644
 --- a/drivers/remoteproc/qcom_q6v5_adsp.c
 +++ b/drivers/remoteproc/qcom_q6v5_adsp.c
 @@ -4,6 +4,11 @@
@@ -127,7 +127,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  };
  
  static int qcom_rproc_pds_attach(struct qcom_adsp *adsp, const char **pd_names,
-@@ -532,6 +570,1131 @@ static const struct rproc_ops adsp_ops = {
+@@ -532,6 +570,1137 @@ static const struct rproc_ops adsp_ops = {
  	.panic = adsp_panic,
  };
  
@@ -202,7 +202,9 @@ index 2e5fb5954fa9..32d262ad7725 100644
 +}
 +
 +/*
-+ * CDSP (VMID 0x1e) static apertures granted by QHEE .367 (table at ELF VA 0xccc08):
++ * CDSP (VMID 0x1e) static apertures granted by QHEE: the 103 of the ASUS .367 build
++ * (table at ELF VA 0xccc08) plus the four read-only SPMI windows that newer builds
++ * (Surface UEFI 175.222.235) add, 107 in all.
 + * {pa, size, perm}, perm bit2 = read, bit1 = write. Names come from the hardware
 + * region directory in the CDSP firmware. "(boot)" marks the entries the CDSP cannot
 + * boot without (bisected on hardware); the others are used at run time, e.g. the
@@ -312,6 +314,10 @@ index 2e5fb5954fa9..32d262ad7725 100644
 +	{ 0x26221000, 0x1000, 0x4 },	/* 100 LLCC_BROADCAST_ANDTRP */
 +	{ 0x320cc000, 0x3000, 0x6 },	/* 101 NSP NoC */
 +	{ 0x322fa000, 0x1000, 0x6 },	/* 102 TURING_VAPSS_NOC_VAPSS_NOC_VAPSS_NOC */
++	{ 0x0c42c000, 0x5000, 0x4 },	/* 103 SPMI0_SPMI_CFG_TOP */
++	{ 0x0c431000, 0x5000, 0x4 },	/* 104 SPMI1_SPMI_CFG_TOP */
++	{ 0x0c4c0000, 0x10000, 0x4 },	/* 105 SPMI0_SPMI_PIC_OWNER */
++	{ 0x0c4d0000, 0x10000, 0x4 },	/* 106 SPMI1_SPMI_PIC_OWNER */
 +};
 +
 +static_assert(ARRAY_SIZE(qhee_cdsp_map) <= QHEE_CDSP_MAP_MAX);
@@ -1259,7 +1265,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  static int adsp_init_clock(struct qcom_adsp *adsp, const char **clk_ids)
  {
  	int num_clks = 0;
-@@ -667,15 +1830,23 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -667,15 +1836,23 @@ static int adsp_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -1286,7 +1292,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  	rproc_coredump_set_elf_info(rproc, ELFCLASS32, EM_NONE);
  
  	adsp = rproc->priv;
-@@ -683,6 +1854,7 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -683,6 +1860,7 @@ static int adsp_probe(struct platform_device *pdev)
  	adsp->rproc = rproc;
  	adsp->info_name = desc->sysmon_name;
  	adsp->has_iommu = desc->has_iommu;
@@ -1294,7 +1300,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  
  	platform_set_drvdata(pdev, adsp);
  
-@@ -712,6 +1884,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -712,6 +1890,12 @@ static int adsp_probe(struct platform_device *pdev)
  	if (ret)
  		goto disable_pm;
  
@@ -1307,7 +1313,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  	ret = qcom_q6v5_init(&adsp->q6v5, pdev, rproc, desc->crash_reason_smem,
  			     desc->load_state, qcom_adsp_pil_handover);
  	if (ret)
-@@ -728,6 +1906,12 @@ static int adsp_probe(struct platform_device *pdev)
+@@ -728,6 +1912,12 @@ static int adsp_probe(struct platform_device *pdev)
  		goto deinit_remove_glink_pdm_ssr;
  	}
  
@@ -1320,7 +1326,7 @@ index 2e5fb5954fa9..32d262ad7725 100644
  	ret = rproc_add(rproc);
  	if (ret)
  		goto remove_sysmon;
-@@ -827,11 +2011,60 @@ static const struct adsp_pil_data wpss_resource_init = {
+@@ -827,11 +2017,60 @@ static const struct adsp_pil_data wpss_resource_init = {
  	.num_pds = 2,
  };
  

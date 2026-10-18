@@ -1,6 +1,6 @@
-From e070f129cb2bfcd34af705b23c7926a0400ac5be Mon Sep 17 00:00:00 2001
+From 30a640a9eed86342f74e326b39b8fa13e5d79695 Mon Sep 17 00:00:00 2001
 From: Kirill Mitrofanov <kmitrqq@gmail.com>
-Date: Sun, 18 Oct 2026 11:35:29 +0300
+Date: Sun, 18 Oct 2026 11:53:37 +0300
 Subject: [PATCH 09/12] reset: qcom: aoss: add X1E80100
 
 On X1E80100 the subsystem restart registers live in AOSS_CC_RST_CTL at
